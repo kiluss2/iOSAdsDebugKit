@@ -60,9 +60,13 @@ final class AdsDebugVC: UIViewController {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(titleLabel)
 
-        closeButton.setTitle("x", for: .normal)
-        closeButton.titleLabel?.font = .systemFont(ofSize: 24, weight: .semibold)
-        closeButton.tintColor = AdsDebugTheme.textSecondary
+        let closeIcon = UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+        closeButton.setImage(UIImage(systemName: "xmark", withConfiguration: closeIcon), for: .normal)
+        closeButton.tintColor = AdsDebugTheme.textPrimary
+        closeButton.backgroundColor = AdsDebugTheme.buttonBackground
+        closeButton.layer.cornerRadius = 20
+        closeButton.layer.borderWidth = 1
+        closeButton.layer.borderColor = AdsDebugTheme.buttonBorder.cgColor
         closeButton.accessibilityLabel = "Close Ads Debug Kit"
         closeButton.addTarget(self, action: #selector(closeTap), for: .touchUpInside)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
@@ -77,10 +81,10 @@ final class AdsDebugVC: UIViewController {
             titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 20),
             titleLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
 
-            closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -12),
+            closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -16),
             closeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 44),
-            closeButton.heightAnchor.constraint(equalToConstant: 44)
+            closeButton.widthAnchor.constraint(equalToConstant: 40),
+            closeButton.heightAnchor.constraint(equalToConstant: 40)
         ])
     }
 
