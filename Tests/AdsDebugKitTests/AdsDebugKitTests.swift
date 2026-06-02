@@ -191,6 +191,36 @@ final class AdsDebugKitTests: XCTestCase {
         }
     }
 
+    func testAdjustRawLogParserAcceptsLegacyAndOSLogForms() {
+        let messageToken = "[Adjust]d: Got JSON response with message:"
+        let responseToken = "[Adjust]v: Response:"
+
+        XCTAssertEqual(
+            normalizedAdjustLine(
+                "[Adjust]d: Got JSON response with message: Ad revenue tracked",
+                messageToken: messageToken,
+                responseToken: responseToken
+            ),
+            "Adjust Response message: Ad revenue tracked"
+        )
+        XCTAssertEqual(
+            normalizedAdjustLine(
+                "Got JSON response with message: Event request failed (Invalid event token)",
+                messageToken: messageToken,
+                responseToken: responseToken
+            ),
+            "Adjust Response message: Event request failed (Invalid event token)"
+        )
+        XCTAssertEqual(
+            normalizedAdjustLine(
+                #"[Adjust]v: Response: {"timestamp":"2026-06-02T06:35:26.852Z+0000","message":"Ad revenue tracked"}"#,
+                messageToken: messageToken,
+                responseToken: responseToken
+            ),
+            "Adjust Response message: Ad revenue tracked"
+        )
+    }
+
     func testSettingsDecodeOldPayloadWithDefaults() throws {
         let data = #"{"debugEnabled":true,"showToasts":true,"keepEvents":12}"#.data(using: .utf8)!
         let settings = try JSONDecoder().decode(AdDebugSettings.self, from: data)

@@ -21,6 +21,7 @@ final class ExternalLogTap {
     private var originalStderr: Int32 = -1
     private let mirrorToStderr = false
     private let maxRemainderBytes = 1 << 20
+    private var isRunning = false
 
     // Facebook tokens (giữ logic cũ)
     private let fbPurchaseToken = "fb_mobile_purchase"
@@ -31,14 +32,23 @@ final class ExternalLogTap {
     private var osPollerAny: Any?
 
     func start() {
+        guard !isRunning else { return }
+        isRunning = true
+
         startPipe()
 
         if #available(iOS 15.0, *) {
             startOSLogPoller_iOS15()
         }
+
+        AdTelemetry.shared.logDebugLine("Legacy raw log tap started")
     }
 
     func stop() {
+        guard isRunning else { return }
+        isRunning = false
+        AdTelemetry.shared.logDebugLine("Legacy raw log tap stopped")
+
         // Stop pipe
         src?.cancel()
         src = nil
@@ -183,6 +193,13 @@ private final class OSLogAdjustPoller {
     private let q = DispatchQueue(label: "external.log.tap.oslog", qos: .utility)
     private var timer: DispatchSourceTimer?
     private var store: OSLogStore?
+    private lazy var adjustPredicate = NSPredicate(
+        format: "eventMessage CONTAINS[c] %@ OR eventMessage CONTAINS[c] %@ OR subsystem CONTAINS[c] %@ OR category CONTAINS[c] %@",
+        "Adjust",
+        "Got JSON response with message",
+        "adjust",
+        "adjust"
+    )
 
     private var lastProcessed: Date = .distantPast
     private var processedHashes = Set<Int>()
@@ -245,7 +262,12 @@ private final class OSLogAdjustPoller {
 
         do {
             let position = store.position(date: windowStart)
-            let entries = try store.getEntries(at: position)
+            let entries: AnySequence<OSLogEntry>
+            do {
+                entries = AnySequence(try store.getEntries(at: position, matching: adjustPredicate))
+            } catch {
+                entries = AnySequence(try store.getEntries(at: position))
+            }
 
             var newestSeen = lastProcessed
             var batch: [String] = []
@@ -296,30 +318,37 @@ private final class OSLogAdjustPoller {
     }
 }
 
-private func normalizedAdjustLine(_ line: String, messageToken: String, responseToken: String) -> String? {
-    if line.contains(messageToken) {
-        let message = line
-            .components(separatedBy: messageToken)
-            .last?
+func normalizedAdjustLine(_ line: String, messageToken: String, responseToken: String) -> String? {
+    let lower = line.lowercased()
+    let hasAdjustMarker = lower.contains("adjust")
+    let messageMarkers = [messageToken, "Got JSON response with message:"]
+
+    for marker in messageMarkers {
+        guard let markerRange = line.range(of: marker, options: [.caseInsensitive]) else { continue }
+        let message = line[markerRange.upperBound...]
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let message, !message.isEmpty else {
+        guard !message.isEmpty else {
             return "Adjust Response message"
         }
         return "Adjust Response message: \(message)"
     }
 
-    guard line.contains(responseToken) else { return nil }
-    let response = line
-        .components(separatedBy: responseToken)
-        .last?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let response, !response.isEmpty else {
-        return "Adjust Response"
+    let responseMarkers = [responseToken, "Response:"]
+    for marker in responseMarkers {
+        guard let markerRange = line.range(of: marker, options: [.caseInsensitive]) else { continue }
+        let response = line[markerRange.upperBound...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !response.isEmpty else {
+            return hasAdjustMarker ? "Adjust Response" : nil
+        }
+        if let message = adjustJSONMessage(from: response), !message.isEmpty {
+            return "Adjust Response message: \(message)"
+        }
+        guard hasAdjustMarker else { continue }
+        return "Adjust Response: \(response)"
     }
-    if let message = adjustJSONMessage(from: response), !message.isEmpty {
-        return "Adjust Response message: \(message)"
-    }
-    return "Adjust Response: \(response)"
+
+    return nil
 }
 
 private func adjustJSONMessage(from response: String) -> String? {

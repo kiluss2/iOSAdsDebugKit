@@ -8,6 +8,18 @@
 import UIKit
 
 final class AdsDebugExternalLogsVC: UIViewController, UITableViewDataSource, UITableViewDelegate {
+    private enum LogEntry {
+        case external(AdDebugExternalEvent)
+        case raw(String, Date)
+
+        var time: Date {
+            switch self {
+            case .external(let event): return event.time
+            case .raw(_, let time): return time
+            }
+        }
+    }
+
     private let table = AdsDebugTableView()
     
     override func viewDidLoad() {
@@ -40,7 +52,7 @@ final class AdsDebugExternalLogsVC: UIViewController, UITableViewDataSource, UIT
     }
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return AdTelemetry.shared.externalEventsSnapshot().count + AdTelemetry.shared.debugLines.count
+        return logEntries().count
     }
     
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
@@ -48,7 +60,7 @@ final class AdsDebugExternalLogsVC: UIViewController, UITableViewDataSource, UIT
     }
 
     func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        AdsDebugTheme.sectionHeader(title: "Logs (\(AdTelemetry.shared.externalEventsSnapshot().count + AdTelemetry.shared.debugLines.count))")
+        AdsDebugTheme.sectionHeader(title: "Logs (\(logEntries().count))")
     }
 
     func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
@@ -58,10 +70,12 @@ final class AdsDebugExternalLogsVC: UIViewController, UITableViewDataSource, UIT
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let c = AdsDebugCardTableViewCell(style: .subtitle, reuseIdentifier: nil)
         c.selectionStyle = .none
-        
-        let externalEvents = AdTelemetry.shared.externalEventsSnapshot()
-        if indexPath.row < externalEvents.count {
-            let item = externalEvents[indexPath.row]
+
+        let entries = logEntries()
+        guard indexPath.row < entries.count else { return c }
+
+        switch entries[indexPath.row] {
+        case .external(let item):
             let time = DateFormatter.cached.string(from: item.time)
             var parts = item.values
                 .filter { !["external_debug", "provider", "event", "status", "message"].contains($0.key) }
@@ -81,37 +95,36 @@ final class AdsDebugExternalLogsVC: UIViewController, UITableViewDataSource, UIT
                 detailFont: .systemFont(ofSize: 11, weight: .regular)
             )
             return c
+        case .raw(let line, _):
+            let monoCell = AdsDebugMonoTableViewCell(style: .default, reuseIdentifier: nil)
+            monoCell.configure(text: line, color: Self.externalLineColor(line))
+            return monoCell
         }
-
-        let rawIndex = indexPath.row - externalEvents.count
-        let linesArray = AdTelemetry.shared.debugLines
-        guard rawIndex < linesArray.count else { return c }
-        
-        let line = linesArray[rawIndex]
-        let monoCell = AdsDebugMonoTableViewCell(style: .default, reuseIdentifier: nil)
-        monoCell.configure(text: line, color: Self.externalLineColor(line))
-        return monoCell
     }
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        let externalEvents = AdTelemetry.shared.externalEventsSnapshot()
-        if indexPath.row < externalEvents.count {
-            let item = externalEvents[indexPath.row]
+        let entries = logEntries()
+        guard indexPath.row < entries.count else { return }
+
+        switch entries[indexPath.row] {
+        case .external(let item):
             UIPasteboard.general.string = "\(item.provider) \(item.event) \(item.status.rawValue) \(item.message ?? "")"
             AdToast.show("Copied external event")
-            tableView.deselectRow(at: indexPath, animated: true)
-            return
+        case .raw(let line, _):
+            UIPasteboard.general.string = line
+            AdToast.show("Copied log line")
         }
-
-        let linesArray = AdTelemetry.shared.debugLines
-        let rawIndex = indexPath.row - externalEvents.count
-        guard rawIndex < linesArray.count else { return }
-        
-        let line = linesArray[rawIndex]
-        UIPasteboard.general.string = line
-        AdToast.show("Copied log line")
-        
         tableView.deselectRow(at: indexPath, animated: true)
+    }
+
+    private func logEntries() -> [LogEntry] {
+        let externalEntries = AdTelemetry.shared.externalEventsSnapshot().map(LogEntry.external)
+        let rawEntries = AdTelemetry.shared.debugLines.map { line in
+            LogEntry.raw(line, Self.rawLineDate(line) ?? Date.distantPast)
+        }
+        return (externalEntries + rawEntries).sorted { lhs, rhs in
+            lhs.time > rhs.time
+        }
     }
 
     private static func compactValue(_ value: String) -> String {
@@ -119,6 +132,28 @@ final class AdsDebugExternalLogsVC: UIViewController, UITableViewDataSource, UIT
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count > 140 else { return trimmed }
         return String(trimmed.prefix(137)) + "..."
+    }
+
+    private static func rawLineDate(_ line: String) -> Date? {
+        guard line.hasPrefix("["),
+              let closeIndex = line.firstIndex(of: "]") else { return nil }
+        let timestamp = String(line[line.index(after: line.startIndex)..<closeIndex])
+        let parts = timestamp.split(separator: ":", maxSplits: 2)
+        guard parts.count == 3,
+              let hour = Int(parts[0]),
+              let minute = Int(parts[1]) else { return nil }
+        let secondParts = parts[2].split(separator: ".", maxSplits: 1)
+        guard let second = Int(secondParts[0]) else { return nil }
+
+        var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        components.hour = hour
+        components.minute = minute
+        components.second = second
+        if secondParts.count == 2,
+           let fraction = Double("0." + secondParts[1]) {
+            components.nanosecond = Int(fraction * 1_000_000_000)
+        }
+        return Calendar.current.date(from: components)
     }
 
     private static func externalLineColor(_ line: String) -> UIColor {

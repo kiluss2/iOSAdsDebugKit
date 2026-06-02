@@ -19,14 +19,14 @@ enum AdsDebugTheme {
     static var card: UIColor {
         switch style {
         case .dark: return UIColor(red: 31 / 255, green: 41 / 255, blue: 55 / 255, alpha: 0.78)
-        case .light: return UIColor.white.withAlphaComponent(0.80)
+        case .light: return UIColor(red: 226 / 255, green: 232 / 255, blue: 240 / 255, alpha: 0.72)
         }
     }
 
     static var cardSolid: UIColor {
         switch style {
         case .dark: return UIColor(red: 31 / 255, green: 41 / 255, blue: 55 / 255, alpha: 1)
-        case .light: return UIColor.white
+        case .light: return UIColor(red: 241 / 255, green: 245 / 255, blue: 249 / 255, alpha: 1)
         }
     }
 
@@ -79,7 +79,7 @@ enum AdsDebugTheme {
     static var tabSelected: UIColor {
         switch style {
         case .dark: return UIColor(red: 55 / 255, green: 69 / 255, blue: 90 / 255, alpha: 0.9)
-        case .light: return UIColor.white.withAlphaComponent(0.88)
+        case .light: return UIColor(red: 226 / 255, green: 232 / 255, blue: 240 / 255, alpha: 0.86)
         }
     }
 
@@ -90,7 +90,7 @@ enum AdsDebugTheme {
     static var buttonBackground: UIColor {
         switch style {
         case .dark: return UIColor(red: 31 / 255, green: 41 / 255, blue: 55 / 255, alpha: 0.8)
-        case .light: return UIColor.white.withAlphaComponent(0.72)
+        case .light: return UIColor(red: 241 / 255, green: 245 / 255, blue: 249 / 255, alpha: 0.80)
         }
     }
 
@@ -111,7 +111,7 @@ enum AdsDebugTheme {
     static var border: UIColor {
         switch style {
         case .dark: return UIColor.white.withAlphaComponent(0.09)
-        case .light: return UIColor.black.withAlphaComponent(0.08)
+        case .light: return UIColor.black.withAlphaComponent(0.12)
         }
     }
 
@@ -146,15 +146,12 @@ enum AdsDebugTheme {
     static var headerShadowOpacity: Float {
         switch style {
         case .dark: return 1
-        case .light: return 0.9
+        case .light: return 1
         }
     }
 
     static var backgroundImageAlpha: CGFloat {
-        switch style {
-        case .dark: return 0.15
-        case .light: return 0.18
-        }
+        0.18
     }
 
     static let cardCornerRadius: CGFloat = 12
@@ -191,8 +188,8 @@ enum AdsDebugTheme {
         label.font = .systemFont(ofSize: 18, weight: .bold)
         label.layer.shadowColor = headerShadowColor.cgColor
         label.layer.shadowOpacity = headerShadowOpacity
-        label.layer.shadowRadius = 8
-        label.layer.shadowOffset = CGSize(width: 0, height: 3)
+        label.layer.shadowRadius = 6
+        label.layer.shadowOffset = CGSize(width: 0, height: 1)
         label.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(label)
 
