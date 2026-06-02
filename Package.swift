@@ -24,7 +24,10 @@ let package = Package(
         .target(
             name: "AdsDebugKit",
             dependencies: [],
-            path: "Sources/AdsDebugKit"
+            path: "Sources/AdsDebugKit",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .testTarget(
             name: "AdsDebugKitTests",
@@ -33,5 +36,4 @@ let package = Package(
         ),
     ]
 )
-
 

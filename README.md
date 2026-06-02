@@ -12,8 +12,10 @@ A lightweight Swift Package Manager (SPM) library for detaily debugging and moni
 
 - 📊 Real-time Ad Event Tracking: Monitor ad events (load, show, click, dismiss, etc.) with a minimal API.
 - 💰 Revenue Tracking: Log ad revenue by network and ad unit (USD).
-- 📱 Debug Console UI: Full-screen debug interface, opened via shake gesture or programmatically.
+- 📱 Debug Console UI: Full-screen dark panel with Ad States, Ad Events, Externals, Custom, Settings, and Ad Units tabs.
 - 🔍 Ad State Monitoring: View load/show state for all configured ad IDs.
+- 🧪 Runtime Ad Unit Overrides: Switch ad units between release, official iOS AdMob demo IDs, invalid IDs, and AdMob-only fallback.
+- 🧾 Structured Logs: Parse Android-compatible `ads_debug=1`, `external_debug=1`, and `custom_debug=1` lines deterministically through API calls.
 - 🧵 Thread-safe: All operations are handled safely across different threads.
 
 ## 📦 Installation
@@ -71,8 +73,21 @@ func application(
   didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
 ) -> Bool {
   let config = AdTelemetryConfiguration(
-    // Provide all your ad IDs
-    allAdIDs: { AdvertisementID.allCases }
+    // Provide all your ad IDs. iOS does not auto-discover IDs from resources.
+    allAdIDs: { AdvertisementID.allCases },
+    adUnitMetadata: { provider in
+      guard let adId = provider as? AdvertisementID else { return nil }
+      return AdDebugAdUnit(
+        name: adId.name,
+        adUnitId: adId.id,
+        unit: AdDebugUnit(adUnitName: adId.name, adUnitId: adId.id)
+      )
+    },
+    admobOnlyAdID: { provider in
+      // Optional: return an AdMob-only fallback for mediation placements.
+      nil
+    },
+    rawLogTapPolicy: .disabled
   )
 
   // Initialize (auto-starts if debug mode was previously enabled)
@@ -137,6 +152,51 @@ AdTelemetry.shared.logRevenue(RevenueEvent(
 
 All other parameters (time, lineItem, eCPM, etc.) are optional.
 
+### 6. Resolve ad unit IDs before loading ads
+
+Runtime overrides only affect requests that pass through the resolver:
+
+```swift
+let adUnitID = AdTelemetry.shared.resolveAdUnitId(
+  provider: AdvertisementID.interstitial,
+  role: .primary
+)
+
+InterstitialAd.load(with: adUnitID, request: request) { ad, error in
+  // ...
+}
+```
+
+When debug mode is disabled or AdsDebugKit has not been initialized, the resolver returns the original release ID.
+
+### 7. Log tracking callbacks
+
+AdsDebugKit does not import Adjust, AppsFlyer, Firebase, Meta, or Google Mobile Ads. Apps should forward SDK callbacks into typed APIs:
+
+```swift
+AdTelemetry.shared.logExternal(
+  provider: "adjust",
+  event: "purchase",
+  status: .success,
+  message: "event tracking succeeded",
+  values: ["callbackId": callbackId]
+)
+
+AdTelemetry.shared.logCustom(
+  event: "paywall_result",
+  status: "submitted",
+  values: ["source": "onboarding"]
+)
+```
+
+Structured parser compatibility is available without global log hooking:
+
+```swift
+AdTelemetry.shared.logStructuredLine("ads_debug=1 unit=interstitial action=load_success name=ADSInterstitialID")
+AdTelemetry.shared.logStructuredLine("external_debug=1 provider=appsflyer event=start status=success")
+AdTelemetry.shared.logStructuredLine("custom_debug=1 event=paywall status=submitted")
+```
+
 ## 🛠 Debug Console
 
 When debug mode is enabled (`AdTelemetry.setDebugEnabled(true)`):
@@ -156,6 +216,44 @@ AdsDebugWindowManager.shared.toggle()
 ```
 
 You can also integrate your own “secret” button/gesture to enable debug mode before opening the console.
+
+### SwiftUI apps
+
+SwiftUI apps still run inside `UIWindowScene`. Use the SwiftUI adapter when you do not have an AppDelegate entry point:
+
+```swift
+import SwiftUI
+import AdsDebugKit
+
+@main
+struct MyApp: App {
+  init() {
+    AdTelemetry.initialize(AdTelemetryConfiguration(
+      allAdIDs: { AdvertisementID.allCases }
+    ))
+  }
+
+  var body: some Scene {
+    WindowGroup {
+      ContentView()
+        .adsDebugConsoleLifecycle(enabled: true)
+    }
+  }
+}
+```
+
+### Legacy raw log tap
+
+`ExternalLogTap` is legacy and disabled by default. Prefer typed callbacks and `logStructuredLine`. If an old app still needs filtered runtime log capture, opt in explicitly:
+
+```swift
+let config = AdTelemetryConfiguration(
+  allAdIDs: { AdvertisementID.allCases },
+  rawLogTapPolicy: .legacyFiltered
+)
+AdTelemetry.initialize(config)
+AdTelemetry.shared.setRawLogTapEnabled(true)
+```
 
 ## 📝 License
 

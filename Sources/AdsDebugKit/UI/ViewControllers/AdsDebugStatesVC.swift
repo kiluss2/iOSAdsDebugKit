@@ -7,15 +7,16 @@
 
 import UIKit
 
-final class AdsDebugStatesVC: UIViewController, UITableViewDataSource {
-    private let table = UITableView(frame: .zero, style: .insetGrouped)
+final class AdsDebugStatesVC: UIViewController, UITableViewDataSource, UITableViewDelegate {
+    private let table = AdsDebugTableView()
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = .clear
         
         table.dataSource = self
+        table.delegate = self
         table.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(table)
         
@@ -49,7 +50,7 @@ final class AdsDebugStatesVC: UIViewController, UITableViewDataSource {
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
+        let cell = AdsDebugCardTableViewCell(style: .subtitle, reuseIdentifier: nil)
         cell.selectionStyle = .none
         
         let states = getAdStates()
@@ -62,23 +63,22 @@ final class AdsDebugStatesVC: UIViewController, UITableViewDataSource {
                 string: "\n\(state.adId)",
                 attributes: [
                     NSAttributedString.Key.font: UIFont.systemFont(ofSize: 10),
-                    NSAttributedString.Key.foregroundColor: UIColor.systemGray,
+                    NSAttributedString.Key.foregroundColor: AdsDebugTheme.textMuted,
                 ]
             )
         )
-        cell.textLabel?.attributedText = titleText
-        cell.textLabel?.numberOfLines = 0
         
         // Build load status string with counts
         var loadText = state.loadState.rawValue
-        var loadColor: UIColor = .systemGray
+        var loadColor: UIColor = AdsDebugTheme.textMuted
         if state.loadState == .loading {
-            loadColor = state.loadState == .loading ? .systemOrange : .systemGray
+            loadColor = AdsDebugTheme.loading
         } else if state.loadState == .success {
             loadText += "(\(state.successCount))"
-            loadColor = .systemGreen
+            loadColor = AdsDebugTheme.success
         } else if state.loadState == .failed {
             if state.failedCount > 0 { loadText += "(\(state.failedCount))" }
+            loadColor = AdsDebugTheme.failed
         }
         
         // Build show status string with count
@@ -86,10 +86,10 @@ final class AdsDebugStatesVC: UIViewController, UITableViewDataSource {
         let showColor: UIColor?
         if state.showedCount > 0 {
             showText = "\(state.showedCount)"
-            showColor = .systemGreen
+            showColor = AdsDebugTheme.success
         } else {
             showText = "No"
-            showColor = .systemGray
+            showColor = AdsDebugTheme.textMuted
         }
         
         // Build details as a list of tuples: (label, value, colorForValue)
@@ -97,7 +97,7 @@ final class AdsDebugStatesVC: UIViewController, UITableViewDataSource {
         let details: [(String, String, UIColor?)] = [
             ("Load: ", loadText, loadColor),
             ("Show/impression: ", showText, showColor),
-            ("Rev: ", String(format: "$%.4f", state.revenueUSD), state.revenueUSD > 0 ? .systemYellow : nil)
+            ("Rev: ", String(format: "$%.4f", state.revenueUSD), state.revenueUSD > 0 ? AdsDebugTheme.loading : nil)
         ]
 
         let detailText = NSMutableAttributedString()
@@ -109,26 +109,34 @@ final class AdsDebugStatesVC: UIViewController, UITableViewDataSource {
             let valueAttributes = item.2.map { [NSAttributedString.Key.foregroundColor: $0] }
             detailText.append(NSAttributedString(string: item.1, attributes: valueAttributes))
         }
-        cell.detailTextLabel?.attributedText = detailText
-        cell.detailTextLabel?.numberOfLines = 3
-        cell.detailTextLabel?.font = UIFont.systemFont(ofSize: 12)
-        
-        // Color coding for load state
+        let titleColor: UIColor
         switch state.loadState {
-        case .success:
-            cell.textLabel?.textColor = .systemGreen
-        case .failed:
-            cell.textLabel?.textColor = .systemRed
-        case .loading:
-            cell.textLabel?.textColor = .systemOrange
-        case .notLoad:
-            cell.textLabel?.textColor = .systemGray
+        case .success: titleColor = AdsDebugTheme.success
+        case .failed: titleColor = AdsDebugTheme.failed
+        case .loading: titleColor = AdsDebugTheme.loading
+        case .notLoad: titleColor = AdsDebugTheme.textMuted
         }
+
+        cell.configure(
+            title: titleText,
+            detail: detailText,
+            titleColor: titleColor,
+            titleFont: .systemFont(ofSize: 15, weight: .regular),
+            detailFont: .systemFont(ofSize: 12, weight: .regular)
+        )
         
         return cell
     }
     
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        return "All IDs"
+        nil
+    }
+
+    func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+        AdsDebugTheme.sectionHeader(title: "All IDs (\(getAdStates().count))")
+    }
+
+    func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        38
     }
 }

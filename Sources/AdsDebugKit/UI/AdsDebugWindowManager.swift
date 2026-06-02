@@ -18,6 +18,10 @@ public final class AdsDebugWindowManager: NSObject {
 
     /// Show full-height sheet
     public func show() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.show() }
+            return
+        }
         guard debugWindow == nil else { return }
 
         // Pick the current foreground scene (for multi-window safety)
@@ -41,28 +45,20 @@ public final class AdsDebugWindowManager: NSObject {
         self.debugWindow = win
         self.hostVC = host
 
-        // Present on next runloop turn to ensure animation
         DispatchQueue.main.async {
             let debugVC = AdsDebugVC()
-            let nav = UINavigationController(rootViewController: debugVC)
-
-            // Sheet style with full-height detent
-            nav.modalPresentationStyle = .formSheet
-            if #available(iOS 15.0, *), let sheet = nav.sheetPresentationController {
-                sheet.detents = [.large()]                 // Full-height sheet
-                sheet.prefersGrabberVisible = true          // Optional grabber
-                sheet.preferredCornerRadius = 16            // Optional corner radius
-                sheet.prefersEdgeAttachedInCompactHeight = false
-                sheet.widthFollowsPreferredContentSizeWhenEdgeAttached = false
-            }
-            nav.presentationController?.delegate = self
-
-            host.present(nav, animated: true, completion: nil)
+            debugVC.modalPresentationStyle = .fullScreen
+            debugVC.presentationController?.delegate = self
+            host.present(debugVC, animated: true, completion: nil)
         }
     }
 
     /// Hide (dismiss presented sheet first if needed)
     public func hide() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.hide() }
+            return
+        }
         if let presented = hostVC?.presentedViewController {
             presented.dismiss(animated: true) { [weak self] in
                 self?.tearDownWindow()
@@ -74,6 +70,10 @@ public final class AdsDebugWindowManager: NSObject {
     
     /// Toggle debug window (show if hidden, hide if visible)
     public func toggle() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.toggle() }
+            return
+        }
         if isVisible {
             hide()
         } else {

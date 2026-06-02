@@ -19,17 +19,7 @@ public final class AdTelemetry {
 
     // MARK: - Settings
 
-    public struct Settings: Codable {
-        public var debugEnabled: Bool = false
-        public var showToasts: Bool = false
-        public var keepEvents: Int = 100
-
-        public init(debugEnabled: Bool = false, showToasts: Bool = false, keepEvents: Int = 100) {
-            self.debugEnabled = debugEnabled
-            self.showToasts = showToasts
-            self.keepEvents = keepEvents
-        }
-    }
+    public typealias Settings = AdDebugSettings
 
     // MARK: - Properties
 
@@ -50,12 +40,18 @@ public final class AdTelemetry {
     // Data storage
     public private(set) var events: [AdEvent] = []
     public private(set) var revenues: [RevenueEvent] = []
+    public private(set) var externalEvents: [AdDebugExternalEvent] = []
+    public private(set) var customEvents: [AdDebugCustomEvent] = []
     // Store ad states by ad ID name (string) for Codable compatibility
     private var adStates: [String: AdStateInfo] = [:]
     private var _debugLines: [String] = []
 
     // UserDefaults
     private let udKey = "telemetry.ads.settings"
+    private let settingsLock = NSLock()
+    private var settingsCache: Settings?
+    private let adUnitsLock = NSLock()
+    private var adUnitsCache: [AdDebugAdUnit]?
 
     // Formatters
     // Timestamp formatter (used only on the source queue)
@@ -80,35 +76,62 @@ public final class AdTelemetry {
     /// Must be called before using AdTelemetry
     private func configure(_ config: AdTelemetryConfiguration) {
         configuration = config
+        invalidateAdUnitsCache()
     }
 
     // MARK: - Settings Management
 
     public var settings: Settings {
         get {
-            if let d = UserDefaults.standard.data(forKey: udKey),
-               let s = try? JSONDecoder().decode(Settings.self, from: d) {
-                return s
-            }
-            // Migration: Check old UserDefaults key for backward compatibility
-            let oldDebugEnabled = UserDefaults.standard.bool(forKey: "telemetry.ads.debugEnabled")
-            if oldDebugEnabled {
-                var newSettings = Settings()
-                newSettings.debugEnabled = oldDebugEnabled
-                UserDefaults.standard.removeObject(forKey: "telemetry.ads.debugEnabled")
-                if let d = try? JSONEncoder().encode(newSettings) {
-                    UserDefaults.standard.set(d, forKey: udKey)
-                }
-                return newSettings
-            }
-            return Settings()
+            settingsLock.lock()
+            defer { settingsLock.unlock() }
+            if let settingsCache { return settingsCache }
+            let loaded = loadSettingsFromDefaults()
+            settingsCache = loaded
+            return loaded
         }
         set {
+            settingsLock.lock()
+            settingsCache = newValue
             if let d = try? JSONEncoder().encode(newValue) {
                 UserDefaults.standard.set(d, forKey: udKey)
             }
+            settingsLock.unlock()
             notify()
         }
+    }
+
+    private func loadSettingsFromDefaults() -> Settings {
+        if let d = UserDefaults.standard.data(forKey: udKey),
+           let s = try? JSONDecoder().decode(Settings.self, from: d) {
+            return s
+        }
+
+        // Migration: Check old UserDefaults key for backward compatibility.
+        let oldDebugEnabled = UserDefaults.standard.bool(forKey: "telemetry.ads.debugEnabled")
+        if oldDebugEnabled {
+            var newSettings = Settings()
+            newSettings.debugEnabled = oldDebugEnabled
+            UserDefaults.standard.removeObject(forKey: "telemetry.ads.debugEnabled")
+            if let d = try? JSONEncoder().encode(newSettings) {
+                UserDefaults.standard.set(d, forKey: udKey)
+            }
+            return newSettings
+        }
+
+        return Settings()
+    }
+
+    private func clearSettingsCache() {
+        settingsLock.lock()
+        settingsCache = nil
+        settingsLock.unlock()
+    }
+
+    private func invalidateAdUnitsCache() {
+        adUnitsLock.lock()
+        adUnitsCache = nil
+        adUnitsLock.unlock()
     }
 
     public static func isDebugEnabled() -> Bool {
@@ -120,8 +143,93 @@ public final class AdTelemetry {
         s.debugEnabled = enabled
         shared.settings = s
 
+        shared.applyDebugServicesState()
+    }
+
+    public static func refreshDebugServices() {
+        shared.applyDebugServicesState()
+    }
+
+    public func setRawLogTapEnabled(_ enabled: Bool) {
+        var s = settings
+        s.rawLogTapEnabled = enabled
+        settings = s
+        applyDebugServicesState()
+    }
+
+    public func setAdIdOverrideMode(_ mode: AdIdOverrideMode) {
+        var s = settings
+        s.adIdOverrideMode = mode
+        settings = s
+    }
+
+    public func setCustomMode(_ mode: AdUnitCustomMode, forAdUnitName adUnitName: String) {
+        guard isOverridablePlacement(adUnitName) else { return }
+
+        let currentSettings = settings
+        var currentModes: [String: AdUnitCustomMode]
+        if currentSettings.adIdOverrideMode == .custom {
+            currentModes = currentSettings.customAdUnitModes.filter { isOverridablePlacement($0.key) }
+        } else {
+            currentModes = snapshotDisplayModes(for: currentSettings.adIdOverrideMode)
+        }
+
+        currentModes[adUnitName] = mode
+        let allRelease = currentModes.values.allSatisfy { $0 == .release }
+
+        var s = currentSettings
+        s.adIdOverrideMode = allRelease ? .normal : .custom
+        s.customAdUnitModes = allRelease ? [:] : currentModes
+        settings = s
+    }
+
+    public func customMode(forAdUnitName adUnitName: String) -> AdUnitCustomMode {
+        return customMode(forAdUnitName: adUnitName, settings: settings)
+    }
+
+    public func displayMode(for adUnit: AdDebugAdUnit) -> AdUnitCustomMode {
+        let currentSettings = settings
+        return displayMode(for: adUnit, settings: currentSettings)
+    }
+
+    public func resolvedAdUnitIdForDisplay(_ adUnit: AdDebugAdUnit) -> String {
+        let currentSettings = settings
+        return resolvedAdUnitIdForDisplay(adUnit, settings: currentSettings)
+    }
+
+    private func resolvedAdUnitIdForDisplay(_ adUnit: AdDebugAdUnit, settings currentSettings: Settings) -> String {
+        guard isOverridable(adUnit) else { return adUnit.adUnitId }
+        switch currentSettings.adIdOverrideMode {
+        case .normal:
+            return adUnit.adUnitId
+        case .failPrimary:
+            return isPriorityPlacement(adUnit.name) ? invalidAdUnitId(for: adUnit.adUnitId) : adUnit.adUnitId
+        case .failAll:
+            return invalidAdUnitId(for: adUnit.adUnitId)
+        case .forceAdMobOnly:
+            return isAdmobOnlyPlacement(adUnit.name) ? adUnit.adUnitId : invalidAdUnitId(for: adUnit.adUnitId)
+        case .custom:
+            switch customMode(forAdUnitName: adUnit.name, settings: currentSettings) {
+            case .release:
+                return adUnit.adUnitId
+            case .debug:
+                return GoogleMobileAdsTestUnitIds.id(for: adUnit.unit)
+            case .falseAd:
+                return invalidAdUnitId(for: adUnit.adUnitId)
+            case .admobOnly:
+                return admobOnlyDisplayId(for: adUnit)
+            }
+        }
+    }
+
+    private func applyDebugServicesState() {
+        let enabled = settings.debugEnabled
         if enabled {
-            ExternalLogTap.shared.start()
+            if shouldRunLegacyRawLogTap {
+                ExternalLogTap.shared.start()
+            } else {
+                ExternalLogTap.shared.stop()
+            }
             MotionShakeDetector.shared.start {
                 AdsDebugWindowManager.shared.toggle()
             }
@@ -133,11 +241,11 @@ public final class AdTelemetry {
 
     /// Start debug services if debug is enabled (called on app launch)
     private func startDebugServicesIfNeeded() {
-        guard AdTelemetry.isDebugEnabled() else { return }
-        ExternalLogTap.shared.start()
-        MotionShakeDetector.shared.start {
-            AdsDebugWindowManager.shared.toggle()
-        }
+        applyDebugServicesState()
+    }
+
+    private var shouldRunLegacyRawLogTap: Bool {
+        return settings.rawLogTapEnabled && configuration?.rawLogTapPolicy == .legacyFiltered
     }
 
     // MARK: - Public API: Event Logging
@@ -181,6 +289,111 @@ public final class AdTelemetry {
         addRevenue(for: r.adIdName, adId: r.adId, valueUSD: r.valueUSD)
     }
 
+    public func logExternal(
+        provider: String,
+        event: String,
+        status: AdDebugExternalStatus,
+        message: String? = nil,
+        values: [String: String] = [:]
+    ) {
+        logExternal(AdDebugExternalEvent(
+            provider: provider,
+            event: event,
+            status: status,
+            message: message,
+            values: values
+        ))
+    }
+
+    public func logExternal(_ event: AdDebugExternalEvent) {
+        guard AdTelemetry.isDebugEnabled() else { return }
+
+        q.async {
+            self.externalEvents.insert(event, at: 0)
+            self.trim()
+            self.notifyOnQueue()
+        }
+    }
+
+    public func logCustom(
+        event: String,
+        status: AdDebugExternalStatus = .debug,
+        message: String? = nil,
+        values: [String: String] = [:]
+    ) {
+        logCustom(AdDebugCustomEvent(
+            event: event,
+            status: status,
+            message: message,
+            values: values
+        ))
+    }
+
+    public func logCustom(_ event: AdDebugCustomEvent) {
+        guard AdTelemetry.isDebugEnabled() else { return }
+
+        q.async {
+            self.customEvents.insert(event, at: 0)
+            self.trim()
+            self.notifyOnQueue()
+        }
+    }
+
+    public func logStructuredLine(_ line: String) {
+        let kv = AdStructuredLogParser.parse(line)
+        if kv["ads_debug"] == "1" {
+            let unitString = kv["unit"] ?? kv["format"] ?? "other"
+            let actionString = kv["event"] ?? kv["action"] ?? kv["status"] ?? "debug"
+            let revenue = Double(kv["valueUSD"] ?? kv["revenueUSD"] ?? kv["revenue"] ?? "")
+            let adIdName = kv["placement"] ?? kv["name"] ?? kv["adIdName"]
+            let adId = kv["adUnit"] ?? kv["adUnitId"] ?? kv["adId"] ?? kv["id"]
+            let network = kv["network"] ?? kv["provider"]
+            let lineItem = kv["lineItem"]
+            let precision = kv["precision"]
+
+            if let revenue {
+                logRevenue(RevenueEvent(
+                    unit: AdUnitKind(raw: unitString),
+                    adIdName: adIdName,
+                    adId: adId,
+                    network: network,
+                    lineItem: lineItem,
+                    valueUSD: revenue,
+                    precision: precision
+                ))
+            } else {
+                log(AdEvent(
+                    unit: AdUnitKind(raw: unitString),
+                    action: AdAction(raw: actionString),
+                    adIdName: adIdName,
+                    adId: adId,
+                    network: network,
+                    lineItem: lineItem,
+                    eCPM: Double(kv["eCPM"] ?? kv["ecpm"] ?? ""),
+                    precision: precision,
+                    error: kv["error"] ?? kv["message"]
+                ))
+            }
+        } else if kv["external_debug"] == "1" {
+            logExternal(
+                provider: kv["provider"] ?? "external",
+                event: kv["event"] ?? "debug",
+                status: AdDebugExternalStatus(rawStatus: kv["status"]),
+                message: kv["message"],
+                values: kv
+            )
+        } else if kv["custom_debug"] == "1" {
+            logCustom(
+                event: kv["event"] ?? "custom",
+                status: AdDebugExternalStatus(rawStatus: kv["status"]),
+                message: kv["message"],
+                values: kv
+            )
+        } else {
+            logDebugLine(line)
+        }
+    }
+
     public func totalRevenueUSD() -> Double {
         q.sync {
             revenues.reduce(0) { $0 + $1.valueUSD }
@@ -196,19 +409,126 @@ public final class AdTelemetry {
         }
     }
 
+    public func eventsSnapshot() -> [AdEvent] {
+        q.sync { events }
+    }
+
+    public func revenuesSnapshot() -> [RevenueEvent] {
+        q.sync { revenues }
+    }
+
+    public func externalEventsSnapshot() -> [AdDebugExternalEvent] {
+        q.sync { externalEvents }
+    }
+
+    public func customEventsSnapshot() -> [AdDebugCustomEvent] {
+        q.sync { customEvents }
+    }
+
+    public func clearEvents() {
+        q.async {
+            self.events.removeAll()
+            self.revenues.removeAll()
+            self.externalEvents.removeAll()
+            self.customEvents.removeAll()
+            self._debugLines.removeAll()
+            self.adStates.removeAll()
+            self.notifyOnQueue()
+        }
+    }
+
+    // MARK: - Public API: Ad Unit Resolver
+
+    public func resolveAdUnitId(
+        provider: any AdIDProvider,
+        admobOnlyProvider: (any AdIDProvider)? = nil,
+        role: AdIdRequestRole = .primary
+    ) -> String {
+        let unit = adDebugUnit(for: provider)
+        let fallbackId = admobOnlyProvider?.id ?? unit.admobOnlyAdUnitId
+        return resolveAdUnitId(
+            placement: provider.name,
+            primaryAdUnitId: provider.id,
+            unit: unit.unit,
+            admobOnlyAdUnitId: fallbackId,
+            role: role
+        )
+    }
+
+    public func resolveAdUnitId(
+        placement: String,
+        primaryAdUnitId: String,
+        unit: AdDebugUnit,
+        admobOnlyAdUnitId: String? = nil,
+        role: AdIdRequestRole = .primary
+    ) -> String {
+        let currentSettings = settings
+        guard currentSettings.debugEnabled else {
+            return originalAdUnitId(primary: primaryAdUnitId, admobOnly: admobOnlyAdUnitId, role: role)
+        }
+        guard !isReadOnlyAppId(primaryAdUnitId) else { return primaryAdUnitId }
+
+        switch currentSettings.adIdOverrideMode {
+        case .normal:
+            return originalAdUnitId(primary: primaryAdUnitId, admobOnly: admobOnlyAdUnitId, role: role)
+        case .failPrimary:
+            if role == .primary, isPriorityPlacement(placement) {
+                return GoogleMobileAdsTestUnitIds.invalid
+            }
+            return originalAdUnitId(primary: primaryAdUnitId, admobOnly: admobOnlyAdUnitId, role: role)
+        case .failAll:
+            return invalidAdUnitId(for: primaryAdUnitId)
+        case .forceAdMobOnly:
+            if isAdmobOnlyPlacement(placement) {
+                return primaryAdUnitId
+            }
+            if role == .admobOnly {
+                return admobOnlyAdUnitId ?? primaryAdUnitId
+            }
+            return invalidAdUnitId(for: primaryAdUnitId)
+        case .custom:
+            return resolveCustomAdUnitId(
+                placement: placement,
+                primaryAdUnitId: primaryAdUnitId,
+                unit: unit,
+                admobOnlyAdUnitId: admobOnlyAdUnitId,
+                role: role,
+                settings: currentSettings
+            )
+        }
+    }
+
+    public func getAdUnits() -> [AdDebugAdUnit] {
+        adUnitsLock.lock()
+        if let adUnitsCache {
+            adUnitsLock.unlock()
+            return adUnitsCache
+        }
+        adUnitsLock.unlock()
+
+        guard let config = configuration else { return [] }
+        let units = config.getAllAdIDs().map { buildAdDebugUnit(for: $0) }
+
+        adUnitsLock.lock()
+        adUnitsCache = units
+        adUnitsLock.unlock()
+
+        return units
+    }
+
     // MARK: - Public API: Ad States
 
     public func getAdStates() -> [AdStateInfo] {
-        guard let config = configuration else { return [] }
+        let units = getAdUnits()
+        guard !units.isEmpty else { return [] }
 
         return q.sync {
-            let allAdIds = config.getAllAdIDs()
-            for adId in allAdIds {
-                let adIdName = adId.name
+            for unit in units {
+                let adIdName = unit.name
                 if adStates[adIdName] == nil {
                     adStates[adIdName] = AdStateInfo(
                         adIdName: adIdName,
-                        adId: adId.id,
+                        adId: unit.adUnitId,
                         loadState: .notLoad,
                         showState: .no,
                         revenueUSD: 0,
@@ -218,7 +538,11 @@ public final class AdTelemetry {
                     )
                 }
             }
-            return allAdIds.compactMap { adStates[$0.name] }
+            let currentSettings = settings
+            return units.compactMap { unit in
+                guard let state = adStates[unit.name] else { return nil }
+                return state.withAdId(resolvedAdUnitIdForDisplay(unit, settings: currentSettings))
+            }
         }
     }
 
@@ -260,6 +584,8 @@ public final class AdTelemetry {
         let k = settings.keepEvents
         if events.count > k { events.removeLast(events.count - k) }
         if revenues.count > k { revenues.removeLast(revenues.count - k) }
+        if externalEvents.count > k { externalEvents.removeLast(externalEvents.count - k) }
+        if customEvents.count > k { customEvents.removeLast(customEvents.count - k) }
     }
 
     /// Thread-safe notify entrypoint (can be called from any thread)
@@ -305,18 +631,16 @@ public final class AdTelemetry {
 
         switch event.action {
         case .loadStart:
-            if currentState.loadState == .notLoad || currentState.loadState == .failed {
-                currentState = AdStateInfo(
-                    adIdName: adIdName,
-                    adId: adId,
-                    loadState: .loading,
-                    showState: currentState.showState,
-                    revenueUSD: currentState.revenueUSD,
-                    successCount: currentState.successCount,
-                    failedCount: currentState.failedCount,
-                    showedCount: currentState.showedCount
-                )
-            }
+            currentState = AdStateInfo(
+                adIdName: adIdName,
+                adId: adId,
+                loadState: .loading,
+                showState: currentState.showState,
+                revenueUSD: currentState.revenueUSD,
+                successCount: currentState.successCount,
+                failedCount: currentState.failedCount,
+                showedCount: currentState.showedCount
+            )
         case .loadSuccess:
             currentState = AdStateInfo(
                 adIdName: adIdName,
@@ -344,7 +668,7 @@ public final class AdTelemetry {
                 adIdName: adIdName,
                 adId: adId,
                 loadState: currentState.loadState,
-                showState: .showed,
+                showState: .showing,
                 revenueUSD: currentState.revenueUSD,
                 successCount: currentState.successCount,
                 failedCount: currentState.failedCount,
@@ -361,12 +685,153 @@ public final class AdTelemetry {
                 failedCount: currentState.failedCount,
                 showedCount: currentState.showedCount + 1
             )
+        case .showFail:
+            currentState = AdStateInfo(
+                adIdName: adIdName,
+                adId: adId,
+                loadState: currentState.loadState,
+                showState: .failed,
+                revenueUSD: currentState.revenueUSD,
+                successCount: currentState.successCount,
+                failedCount: currentState.failedCount + 1,
+                showedCount: currentState.showedCount
+            )
         default:
             break
         }
 
         adStates[adIdName] = currentState
     }
+
+    private func adDebugUnit(for provider: any AdIDProvider) -> AdDebugAdUnit {
+        if let cached = getAdUnits().first(where: { $0.name == provider.name }) {
+            return cached
+        }
+        return buildAdDebugUnit(for: provider)
+    }
+
+    private func buildAdDebugUnit(for provider: any AdIDProvider) -> AdDebugAdUnit {
+        if let configured = configuration?.adUnitMetadata?(provider) {
+            return configured
+        }
+        let backup = configuration?.admobOnlyAdID?(provider)?.id
+        let unit = AdDebugUnit(adUnitName: provider.name, adUnitId: provider.id)
+        return AdDebugAdUnit(
+            name: provider.name,
+            adUnitId: provider.id,
+            unit: unit,
+            isReadOnly: isReadOnlyAppId(provider.id),
+            admobOnlyAdUnitId: backup
+        )
+    }
+
+    private func originalAdUnitId(primary: String, admobOnly: String?, role: AdIdRequestRole) -> String {
+        switch role {
+        case .primary: return primary
+        case .admobOnly: return admobOnly ?? primary
+        }
+    }
+
+    private func customMode(forAdUnitName adUnitName: String, settings currentSettings: Settings) -> AdUnitCustomMode {
+        return currentSettings.customAdUnitModes[adUnitName] ?? .release
+    }
+
+    private func resolveCustomAdUnitId(
+        placement: String,
+        primaryAdUnitId: String,
+        unit: AdDebugUnit,
+        admobOnlyAdUnitId: String?,
+        role: AdIdRequestRole,
+        settings currentSettings: Settings
+    ) -> String {
+        switch customMode(forAdUnitName: placement, settings: currentSettings) {
+        case .release:
+            return originalAdUnitId(primary: primaryAdUnitId, admobOnly: admobOnlyAdUnitId, role: role)
+        case .debug:
+            return GoogleMobileAdsTestUnitIds.id(for: unit)
+        case .falseAd:
+            return invalidAdUnitId(for: primaryAdUnitId)
+        case .admobOnly:
+            return admobOnlyAdUnitId ?? primaryAdUnitId
+        }
+    }
+
+    private func snapshotDisplayModes(for mode: AdIdOverrideMode) -> [String: AdUnitCustomMode] {
+        return getAdUnits()
+            .filter(isOverridable)
+            .reduce(into: [String: AdUnitCustomMode]()) { result, adUnit in
+                result[adUnit.name] = displayMode(for: adUnit, mode: mode)
+            }
+    }
+
+    private func displayMode(for adUnit: AdDebugAdUnit, settings currentSettings: Settings) -> AdUnitCustomMode {
+        guard isOverridable(adUnit) else { return .release }
+        if currentSettings.adIdOverrideMode == .custom {
+            return customMode(forAdUnitName: adUnit.name, settings: currentSettings)
+        }
+        return displayMode(for: adUnit, mode: currentSettings.adIdOverrideMode)
+    }
+
+    private func displayMode(for adUnit: AdDebugAdUnit, mode: AdIdOverrideMode) -> AdUnitCustomMode {
+        guard isOverridable(adUnit) else { return .release }
+        switch mode {
+        case .normal:
+            return .release
+        case .failPrimary:
+            return isPriorityPlacement(adUnit.name) ? .falseAd : .release
+        case .failAll:
+            return .falseAd
+        case .forceAdMobOnly:
+            return isAdmobOnlyPlacement(adUnit.name) ? .release : .falseAd
+        case .custom:
+            return customMode(forAdUnitName: adUnit.name)
+        }
+    }
+
+    private func isOverridable(_ adUnit: AdDebugAdUnit) -> Bool {
+        return !adUnit.isReadOnly && adUnit.unit != .appId
+    }
+
+    private func isOverridablePlacement(_ placement: String) -> Bool {
+        guard let adUnit = getAdUnits().first(where: { $0.name == placement }) else { return true }
+        return isOverridable(adUnit)
+    }
+
+    private func invalidAdUnitId(for primaryAdUnitId: String) -> String {
+        return isReadOnlyAppId(primaryAdUnitId) ? primaryAdUnitId : GoogleMobileAdsTestUnitIds.invalid
+    }
+
+    private func admobOnlyDisplayId(for adUnit: AdDebugAdUnit) -> String {
+        if adUnit.unit == .appId { return adUnit.adUnitId }
+        if let direct = adUnit.admobOnlyAdUnitId { return direct }
+        let peerName = admobOnlyPeerPlacement(for: adUnit.name)
+        return getAdUnits().first(where: { $0.name == peerName })?.adUnitId ?? adUnit.adUnitId
+    }
+
+    private func isReadOnlyAppId(_ adUnitId: String) -> Bool {
+        return adUnitId.contains("~") && !adUnitId.contains("/")
+    }
+
+    private func isPriorityPlacement(_ placement: String) -> Bool {
+        let lower = placement.lowercased()
+        return lower.contains("2fid") || lower.contains("mfid") || lower.contains("_2f_id") || lower.contains("_mf_id")
+    }
+
+    private func isAdmobOnlyPlacement(_ placement: String) -> Bool {
+        return placement.lowercased().contains("admobonly") || placement.lowercased().contains("admob_only")
+    }
+
+    private func admobOnlyPeerPlacement(for placement: String) -> String? {
+        guard !isAdmobOnlyPlacement(placement) else { return nil }
+        if placement.hasSuffix("ID") {
+            return String(placement.dropLast(2)) + "AdMobOnlyID"
+        }
+        if placement.hasSuffix("_id") {
+            return String(placement.dropLast(3)) + "_admob_only_id"
+        }
+        return nil
+    }
+
 
     private func addRevenue(for adIdName: String?, adId: String?, valueUSD: Double) {
         guard let adIdName, let adId else { return }
@@ -399,6 +864,73 @@ public final class AdTelemetry {
             self.adStates[adIdName] = currentState
             self.notifyOnQueue()
         }
+    }
+
+    func resetForTesting() {
+        ExternalLogTap.shared.stop()
+        MotionShakeDetector.shared.stop()
+        configuration = nil
+        clearSettingsCache()
+        invalidateAdUnitsCache()
+        UserDefaults.standard.removeObject(forKey: udKey)
+        UserDefaults.standard.removeObject(forKey: "telemetry.ads.debugEnabled")
+        q.sync {
+            events.removeAll()
+            revenues.removeAll()
+            externalEvents.removeAll()
+            customEvents.removeAll()
+            adStates.removeAll()
+            _debugLines.removeAll()
+            notifyScheduled = false
+        }
+    }
+}
+
+enum AdStructuredLogParser {
+    static func parse(_ line: String) -> [String: String] {
+        var result: [String: String] = [:]
+        var key = ""
+        var value = ""
+        var readingKey = true
+        var inQuotes = false
+        var quote: Character = "\""
+
+        func flush() {
+            guard !key.isEmpty else { return }
+            result[key] = value
+            key.removeAll(keepingCapacity: true)
+            value.removeAll(keepingCapacity: true)
+            readingKey = true
+        }
+
+        for ch in line {
+            if readingKey {
+                if ch == "=" {
+                    readingKey = false
+                } else if ch == " " || ch == "\t" || ch == "\n" {
+                    flush()
+                } else {
+                    key.append(ch)
+                }
+            } else {
+                if inQuotes {
+                    if ch == quote {
+                        inQuotes = false
+                    } else {
+                        value.append(ch)
+                    }
+                } else if ch == "\"" || ch == "'" {
+                    inQuotes = true
+                    quote = ch
+                } else if ch == " " || ch == "\t" || ch == "\n" {
+                    flush()
+                } else {
+                    value.append(ch)
+                }
+            }
+        }
+        flush()
+        return result
     }
 }
 

@@ -1,154 +1,183 @@
-//
-//  AdsDebugVC.swift
-//  AdsDebugKit
-//
-//  Created by Son Le on 2025.
-//
-
 import UIKit
 
 final class AdsDebugVC: UIViewController {
-    private let pageVC = UIPageViewController(transitionStyle: .scroll, navigationOrientation: .horizontal)
-    private let segmentedControl = UISegmentedControl(items: ["Ad States", "Ad Events", "Externals", "Settings"])
-    
-    private let statesVC = AdsDebugStatesVC()
-    private let eventsVC = AdsDebugEventsVC()
-    private let adjustLogsVC = AdsDebugExternalLogsVC()
-    private let settingsVC = AdsDebugSettingsVC()
-    
+    static let tabTitles = ["Ad States", "Ad Events", "Externals", "Custom", "Settings", "Ad Units"]
+
+    private let backgroundView = AdsDebugBackgroundView()
+    private let header = UIView()
+    private let titleLabel = UILabel()
+    private let closeButton = UIButton(type: .system)
+    private let tabScrollView = UIScrollView()
+    private let tabStack = UIStackView()
+    private let contentView = UIView()
+    private var tabButtons: [UIButton] = []
+    private var selectedIndex = 0
+
+    private lazy var childControllers: [UIViewController] = [
+        AdsDebugStatesVC(),
+        AdsDebugEventsVC(),
+        AdsDebugExternalLogsVC(),
+        AdsDebugCustomVC(),
+        AdsDebugSettingsVC(),
+        AdsDebugAdUnitsVC()
+    ]
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-        title = "Ads Debug Console"
-        view.backgroundColor = .systemBackground
-        
-        // Setup segmented control
-        segmentedControl.selectedSegmentIndex = 0
-        segmentedControl.addTarget(self, action: #selector(segmentChanged), for: .valueChanged)
-        // Wrap segmentedControl in a container UIView to shift it down by 8px
-        let container = UIView()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        
-        segmentedControl.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(segmentedControl)
-        NSLayoutConstraint.activate([
-            segmentedControl.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
-            segmentedControl.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            segmentedControl.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            segmentedControl.bottomAnchor.constraint(equalTo: container.bottomAnchor)
-        ])
-        
-        navigationItem.titleView = container
-        
-//        navigationItem.rightBarButtonItem = UIBarButtonItem(
-//            title: "Close",
-//            style: .done,
-//            target: self,
-//            action: #selector(closeTap)
-//        )
-        
-        // Setup page view controller
-        pageVC.dataSource = self
-        pageVC.delegate = self
-        pageVC.setViewControllers([statesVC], direction: .forward, animated: false)
-        
-        addChild(pageVC)
-        view.addSubview(pageVC.view)
-        pageVC.view.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            pageVC.view.topAnchor.constraint(equalTo: view.topAnchor),
-            pageVC.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            pageVC.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            pageVC.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
-        pageVC.didMove(toParent: self)
+        view.backgroundColor = .clear
+        buildBackground()
+        buildHeader()
+        buildTabs()
+        buildContent()
+        selectTab(0, animated: false)
     }
-    
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        // Fallback: If dismissed interactively (drag down), ensure window is torn down
-        if isBeingDismissed || navigationController?.isBeingDismissed ?? false {
+        if isBeingDismissed || navigationController?.isBeingDismissed == true {
             AdsDebugWindowManager.shared.hide()
         }
     }
-    
-    @objc private func segmentChanged() {
-        let index = segmentedControl.selectedSegmentIndex
-        let vc: UIViewController
-        
-        switch index {
-        case 0:
-            vc = statesVC
-        case 1:
-            vc = eventsVC
-        case 2:
-            vc = adjustLogsVC
-        case 3:
-            vc = settingsVC
-        default:
-            return
-        }
-        
-        // Determine direction based on current page
-        let currentIndex: Int
-        if pageVC.viewControllers?.first === statesVC {
-            currentIndex = 0
-        } else if pageVC.viewControllers?.first === eventsVC {
-            currentIndex = 1
-        } else if pageVC.viewControllers?.first === adjustLogsVC {
-            currentIndex = 2
-        } else if pageVC.viewControllers?.first === settingsVC {
-            currentIndex = 3
-        } else {
-            currentIndex = 0
-        }
-        
-        let direction: UIPageViewController.NavigationDirection = index > currentIndex ? .forward : .reverse
-        pageVC.setViewControllers([vc], direction: direction, animated: true)
-    }
-    
-    @objc private func closeTap() {
-        // Dismiss and cleanup window
-        AdsDebugWindowManager.shared.hide()
-    }
-}
 
-extension AdsDebugVC: UIPageViewControllerDataSource, UIPageViewControllerDelegate {
-    func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? {
-        if viewController === statesVC {
-            return nil
-        } else if viewController === eventsVC {
-            return statesVC
-        } else if viewController === adjustLogsVC {
-            return eventsVC
-        } else {
-            return adjustLogsVC
+    private func buildBackground() {
+        backgroundView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(backgroundView)
+        NSLayoutConstraint.activate([
+            backgroundView.topAnchor.constraint(equalTo: view.topAnchor),
+            backgroundView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            backgroundView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backgroundView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+    }
+
+    private func buildHeader() {
+        header.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(header)
+
+        titleLabel.text = "Ads Debug Kit"
+        titleLabel.textColor = AdsDebugTheme.textPrimary
+        titleLabel.font = .systemFont(ofSize: 20, weight: .bold)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(titleLabel)
+
+        closeButton.setTitle("x", for: .normal)
+        closeButton.titleLabel?.font = .systemFont(ofSize: 24, weight: .semibold)
+        closeButton.tintColor = AdsDebugTheme.textSecondary
+        closeButton.accessibilityLabel = "Close Ads Debug Kit"
+        closeButton.addTarget(self, action: #selector(closeTap), for: .touchUpInside)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(closeButton)
+
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            header.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            header.heightAnchor.constraint(equalToConstant: 56),
+
+            titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 20),
+            titleLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+
+            closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -12),
+            closeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 44),
+            closeButton.heightAnchor.constraint(equalToConstant: 44)
+        ])
+    }
+
+    private func buildTabs() {
+        tabScrollView.translatesAutoresizingMaskIntoConstraints = false
+        tabScrollView.showsHorizontalScrollIndicator = false
+        view.addSubview(tabScrollView)
+
+        tabStack.axis = .horizontal
+        tabStack.spacing = 8
+        tabStack.alignment = .fill
+        tabStack.translatesAutoresizingMaskIntoConstraints = false
+        tabScrollView.addSubview(tabStack)
+
+        tabButtons = Self.tabTitles.enumerated().map { index, title in
+            let button = UIButton(type: .system)
+            button.setTitle(title, for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+            button.contentEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+            button.layer.cornerRadius = 8
+            button.layer.borderWidth = 1
+            button.tag = index
+            button.addTarget(self, action: #selector(tabTap(_:)), for: .touchUpInside)
+            tabStack.addArrangedSubview(button)
+            return button
+        }
+
+        NSLayoutConstraint.activate([
+            tabScrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            tabScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tabScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tabScrollView.heightAnchor.constraint(equalToConstant: 48),
+
+            tabStack.topAnchor.constraint(equalTo: tabScrollView.contentLayoutGuide.topAnchor, constant: 6),
+            tabStack.bottomAnchor.constraint(equalTo: tabScrollView.contentLayoutGuide.bottomAnchor, constant: -6),
+            tabStack.leadingAnchor.constraint(equalTo: tabScrollView.contentLayoutGuide.leadingAnchor, constant: 16),
+            tabStack.trailingAnchor.constraint(equalTo: tabScrollView.contentLayoutGuide.trailingAnchor, constant: -16),
+            tabStack.heightAnchor.constraint(equalTo: tabScrollView.frameLayoutGuide.heightAnchor, constant: -12)
+        ])
+    }
+
+    private func buildContent() {
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(contentView)
+        NSLayoutConstraint.activate([
+            contentView.topAnchor.constraint(equalTo: tabScrollView.bottomAnchor),
+            contentView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            contentView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    @objc private func tabTap(_ sender: UIButton) {
+        selectTab(sender.tag, animated: true)
+    }
+
+    private func selectTab(_ index: Int, animated: Bool) {
+        guard index >= 0, index < childControllers.count else { return }
+
+        let current = children.first
+        let next = childControllers[index]
+        selectedIndex = index
+        updateTabButtons()
+
+        current?.willMove(toParent: nil)
+        current?.view.removeFromSuperview()
+        current?.removeFromParent()
+
+        addChild(next)
+        next.view.translatesAutoresizingMaskIntoConstraints = false
+        next.view.alpha = animated ? 0 : 1
+        contentView.addSubview(next.view)
+        NSLayoutConstraint.activate([
+            next.view.topAnchor.constraint(equalTo: contentView.topAnchor),
+            next.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            next.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            next.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        ])
+        next.didMove(toParent: self)
+
+        if animated {
+            UIView.animate(withDuration: 0.16) {
+                next.view.alpha = 1
+            }
         }
     }
-    
-    func pageViewController(_ pageViewController: UIPageViewController, viewControllerAfter viewController: UIViewController) -> UIViewController? {
-        if viewController === statesVC {
-            return eventsVC
-        } else if viewController === eventsVC {
-            return adjustLogsVC
-        } else if viewController === adjustLogsVC {
-            return settingsVC
-        } else {
-            return nil
+
+    private func updateTabButtons() {
+        for button in tabButtons {
+            let isSelected = button.tag == selectedIndex
+            button.backgroundColor = isSelected ? AdsDebugTheme.tabSelected : AdsDebugTheme.card
+            button.setTitleColor(isSelected ? .white : AdsDebugTheme.textSecondary, for: .normal)
+            button.layer.borderColor = (isSelected ? AdsDebugTheme.buttonBorder : AdsDebugTheme.border).cgColor
         }
     }
-    
-    func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
-        guard completed, let current = pageViewController.viewControllers?.first else { return }
-        
-        if current === statesVC {
-            segmentedControl.selectedSegmentIndex = 0
-        } else if current === eventsVC {
-            segmentedControl.selectedSegmentIndex = 1
-        } else if current === adjustLogsVC {
-            segmentedControl.selectedSegmentIndex = 2
-        } else if current === settingsVC {
-            segmentedControl.selectedSegmentIndex = 3
-        }
+
+    @objc private func closeTap() {
+        AdsDebugWindowManager.shared.hide()
     }
 }
