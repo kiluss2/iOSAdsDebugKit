@@ -265,6 +265,24 @@ final class AdsDebugKitTests: XCTestCase {
         XCTAssertEqual(vc.children.count, 1)
     }
 
+    func testConsoleBackgroundLeavesStatusAreaTransparentLikeAndroid() {
+        let vc = AdsDebugVC()
+        vc.loadViewIfNeeded()
+
+        guard let background = vc.view.adsDebugFirstSubview(of: AdsDebugBackgroundView.self) else {
+            return XCTFail("Expected console background view")
+        }
+
+        let pinsBackgroundToSafeArea = vc.view.constraints.contains { constraint in
+            constraint.firstItem as? UIView === background &&
+            constraint.firstAttribute == .top &&
+            constraint.secondItem as? UILayoutGuide === vc.view.safeAreaLayoutGuide &&
+            constraint.secondAttribute == .top
+        }
+
+        XCTAssertTrue(pinsBackgroundToSafeArea)
+    }
+
     func testSettingsSwitchStaysInsideAndroidStyleRowLayout() {
         let vc = AdsDebugSettingsVC()
         vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
