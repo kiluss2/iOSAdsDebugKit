@@ -123,15 +123,27 @@ AdsDebugWindowManager.shared.toggle()
 
 Use the same style as Android: attach an unlock gesture to a quiet view, such as an app icon on a splash or settings screen.
 
+UIKit:
+
 ```swift
 let helper = DebugComboGestureHelper()
 helper.setup(on: appIconView) {
-  AdTelemetry.setDebugEnabled(true)
   AdsDebugWindowManager.shared.show()
 }
 ```
 
-Keep a strong reference to `helper` for as long as the unlock view is alive.
+SwiftUI:
+
+```swift
+Image("AppIcon")
+  .resizable()
+  .frame(width: 96, height: 96)
+  .adsDebugComboUnlock()
+```
+
+`DebugComboGestureHelper` enables debug mode internally before calling the completion. Keep a
+strong reference to `helper` for as long as the UIKit unlock view is alive. SwiftUI apps should use
+`.adsDebugComboUnlock()` so the package owns that bridge.
 
 ### 5. Log Ad Events
 
@@ -420,6 +432,17 @@ struct MyApp: App {
 ```
 
 You can also call `AdsDebugSwiftUIBridge.show()`, `hide()`, or `toggle()` from SwiftUI controls.
+
+Attach the hidden combo directly to a quiet SwiftUI view, usually the splash app icon:
+
+```swift
+SplashAppIconView()
+  .adsDebugComboUnlock()
+```
+
+The modifier installs AdsDebugKit's built-in `DebugComboGestureHelper` under the hood. It does not
+replace `adsDebugConsoleLifecycle`; use both. The lifecycle modifier refreshes debug services on
+launch when debug mode was previously enabled, while the combo modifier unlocks the panel.
 
 ## Legacy Raw Log Tap
 
