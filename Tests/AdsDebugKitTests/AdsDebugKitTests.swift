@@ -150,6 +150,28 @@ final class AdsDebugKitTests: XCTestCase {
         XCTAssertEqual(banner?.successCount, 1)
     }
 
+    func testShowSuccessAndImpressionCountAsOnePresentation() {
+        enableDebug()
+
+        AdTelemetry.shared.log(AdEvent(unit: .interstitial, action: .showStart, adId: TestAdID.priority))
+        AdTelemetry.shared.log(AdEvent(unit: .interstitial, action: .showSuccess, adId: TestAdID.priority))
+        AdTelemetry.shared.log(AdEvent(unit: .interstitial, action: .impression, adId: TestAdID.priority))
+
+        waitUntil {
+            AdTelemetry.shared.getAdStates().first { $0.adIdName == TestAdID.priority.name }?.showedCount == 1
+        }
+
+        AdTelemetry.shared.log(AdEvent(unit: .interstitial, action: .showStart, adId: TestAdID.priority))
+        AdTelemetry.shared.log(AdEvent(unit: .interstitial, action: .showSuccess, adId: TestAdID.priority))
+
+        waitUntil {
+            AdTelemetry.shared.getAdStates().first { $0.adIdName == TestAdID.priority.name }?.showedCount == 2
+        }
+
+        let priority = AdTelemetry.shared.getAdStates().first { $0.adIdName == TestAdID.priority.name }
+        XCTAssertEqual(priority?.showedCount, 2)
+    }
+
     func testStructuredParserLogsAdExternalAndCustomEvents() {
         enableDebug()
 

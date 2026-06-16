@@ -44,6 +44,7 @@ public final class AdTelemetry {
     public private(set) var customEvents: [AdDebugCustomEvent] = []
     // Store ad states by ad ID name (string) for Codable compatibility
     private var adStates: [String: AdStateInfo] = [:]
+    private var adNamesWithPendingShowSuccessCount = Set<String>()
     private var _debugLines: [String] = []
     private var recentDebugLineTimestamps: [String: Date] = [:]
     private let recentDebugLineDedupWindow: TimeInterval = 2
@@ -447,6 +448,7 @@ public final class AdTelemetry {
             self._debugLines.removeAll()
             self.recentDebugLineTimestamps.removeAll()
             self.adStates.removeAll()
+            self.adNamesWithPendingShowSuccessCount.removeAll()
             self.notifyOnQueue()
         }
     }
@@ -711,6 +713,7 @@ public final class AdTelemetry {
                 showedCount: currentState.showedCount
             )
         case .showStart:
+            adNamesWithPendingShowSuccessCount.remove(adIdName)
             currentState = AdStateInfo(
                 adIdName: adIdName,
                 adId: adId,
@@ -721,7 +724,8 @@ public final class AdTelemetry {
                 failedCount: currentState.failedCount,
                 showedCount: currentState.showedCount
             )
-        case .showSuccess, .impression:
+        case .showSuccess:
+            adNamesWithPendingShowSuccessCount.insert(adIdName)
             currentState = AdStateInfo(
                 adIdName: adIdName,
                 adId: adId,
@@ -732,7 +736,20 @@ public final class AdTelemetry {
                 failedCount: currentState.failedCount,
                 showedCount: currentState.showedCount + 1
             )
+        case .impression:
+            let didAlreadyCountShowSuccess = adNamesWithPendingShowSuccessCount.remove(adIdName) != nil
+            currentState = AdStateInfo(
+                adIdName: adIdName,
+                adId: adId,
+                loadState: currentState.loadState,
+                showState: .showed,
+                revenueUSD: currentState.revenueUSD,
+                successCount: currentState.successCount,
+                failedCount: currentState.failedCount,
+                showedCount: currentState.showedCount + (didAlreadyCountShowSuccess ? 0 : 1)
+            )
         case .showFail:
+            adNamesWithPendingShowSuccessCount.remove(adIdName)
             currentState = AdStateInfo(
                 adIdName: adIdName,
                 adId: adId,
@@ -927,6 +944,7 @@ public final class AdTelemetry {
             externalEvents.removeAll()
             customEvents.removeAll()
             adStates.removeAll()
+            adNamesWithPendingShowSuccessCount.removeAll()
             _debugLines.removeAll()
             recentDebugLineTimestamps.removeAll()
             notifyScheduled = false
