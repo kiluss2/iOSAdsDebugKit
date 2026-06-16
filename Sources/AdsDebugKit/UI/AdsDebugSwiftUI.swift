@@ -40,7 +40,7 @@ private struct AdsDebugComboUnlockModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         if enabled {
-            content.background(AdsDebugComboUnlockHost(onUnlock: onUnlock))
+            content.overlay(AdsDebugComboUnlockHost(onUnlock: onUnlock))
         } else {
             content
         }
@@ -57,14 +57,18 @@ private struct AdsDebugComboUnlockHost: UIViewRepresentable {
 
     func makeUIView(context: Context) -> ComboUnlockHostView {
         let view = ComboUnlockHostView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
+        view.accessibilityIdentifier = "AdsDebugComboUnlockHost"
         view.coordinator = context.coordinator
+        context.coordinator.install(on: view)
         return view
     }
 
     func updateUIView(_ uiView: ComboUnlockHostView, context: Context) {
         context.coordinator.onUnlock = onUnlock
         uiView.coordinator = context.coordinator
-        uiView.installIfPossible()
+        context.coordinator.install(on: uiView)
     }
 
     final class Coordinator {
@@ -101,20 +105,6 @@ private struct AdsDebugComboUnlockHost: UIViewRepresentable {
 
     final class ComboUnlockHostView: UIView {
         weak var coordinator: Coordinator?
-
-        override func didMoveToSuperview() {
-            super.didMoveToSuperview()
-            installIfPossible()
-        }
-
-        func installIfPossible() {
-            guard let superview else { return }
-            coordinator?.install(on: superview)
-        }
-
-        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-            false
-        }
     }
 }
 #endif
