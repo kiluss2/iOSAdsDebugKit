@@ -48,7 +48,10 @@ final class AdsDebugExternalLogsVC: UIViewController, UITableViewDataSource, UIT
     }
     
     @objc private func reload() {
-        table.reloadData()
+        table.adsDebugReloadDataPreservingVisibleItem(
+            anchorKeyForVisibleCell: { _, cell in cell.accessibilityIdentifier },
+            indexPathForKey: indexPath(forLogKey:)
+        )
     }
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -76,6 +79,7 @@ final class AdsDebugExternalLogsVC: UIViewController, UITableViewDataSource, UIT
 
         switch entries[indexPath.row] {
         case .external(let item):
+            c.accessibilityIdentifier = Self.key(for: entries[indexPath.row])
             let time = DateFormatter.cached.string(from: item.time)
             var parts = item.values
                 .filter { !["external_debug", "provider", "event", "status", "message"].contains($0.key) }
@@ -97,6 +101,7 @@ final class AdsDebugExternalLogsVC: UIViewController, UITableViewDataSource, UIT
             return c
         case .raw(let line, _):
             let monoCell = AdsDebugMonoTableViewCell(style: .default, reuseIdentifier: nil)
+            monoCell.accessibilityIdentifier = Self.key(for: entries[indexPath.row])
             monoCell.configure(text: line, color: Self.externalLineColor(line))
             return monoCell
         }
@@ -124,6 +129,29 @@ final class AdsDebugExternalLogsVC: UIViewController, UITableViewDataSource, UIT
         }
         return (externalEntries + rawEntries).sorted { lhs, rhs in
             lhs.time > rhs.time
+        }
+    }
+
+    private func indexPath(forLogKey key: String) -> IndexPath? {
+        let entries = logEntries()
+        guard let row = entries.firstIndex(where: { Self.key(for: $0) == key }) else { return nil }
+        return IndexPath(row: row, section: 0)
+    }
+
+    private static func key(for entry: LogEntry) -> String {
+        switch entry {
+        case .external(let item):
+            return [
+                "external",
+                String(item.time.timeIntervalSinceReferenceDate),
+                item.provider,
+                item.event,
+                item.status.rawValue,
+                item.message ?? "",
+                item.values.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
+            ].joined(separator: "|")
+        case .raw(let line, let time):
+            return ["raw", String(time.timeIntervalSinceReferenceDate), line].joined(separator: "|")
         }
     }
 

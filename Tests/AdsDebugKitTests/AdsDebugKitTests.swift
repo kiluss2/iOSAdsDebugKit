@@ -36,6 +36,33 @@ final class AdsDebugKitTests: XCTestCase {
         )
     }
 
+    func testResolverFailPrimaryAlsoAffectsHFPlacements() {
+        enableDebug(mode: .failPrimary)
+
+        let hfPlacement = "ADSInterstitialOpenFirstHFID"
+        let hfAdUnitId = "ca-app-pub-1234567890123456/5555555555"
+
+        XCTAssertEqual(
+            AdTelemetry.shared.resolveAdUnitId(
+                placement: hfPlacement,
+                primaryAdUnitId: hfAdUnitId,
+                unit: .interstitial
+            ),
+            GoogleMobileAdsTestUnitIds.invalid
+        )
+
+        let hfUnit = AdDebugAdUnit(
+            name: hfPlacement,
+            adUnitId: hfAdUnitId,
+            unit: .interstitial
+        )
+        XCTAssertEqual(AdTelemetry.shared.displayMode(for: hfUnit), .falseAd)
+        XCTAssertEqual(
+            AdTelemetry.shared.resolvedAdUnitIdForDisplay(hfUnit),
+            GoogleMobileAdsTestUnitIds.invalid
+        )
+    }
+
     func testResolverForceAdMobOnlyUsesFallbackForAdMobRole() {
         enableDebug(mode: .forceAdMobOnly)
 
@@ -373,6 +400,66 @@ final class AdsDebugKitTests: XCTestCase {
         XCTAssertNotEqual(alert.popoverPresentationController?.sourceRect, .zero)
     }
 
+    func testDebugComboGestureDefaultSequenceMatchesAndroidStyleUnlock() {
+        XCTAssertEqual(DebugComboGestureStep.defaultSequence, [.swipeDown, .tap(count: 2), .swipeUp])
+
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 120, height: 120))
+        let helper = DebugComboGestureHelper()
+        helper.setup(on: view) {}
+
+        XCTAssertEqual(view.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.count, 1)
+        XCTAssertEqual(
+            view.gestureRecognizers?.compactMap { $0 as? UITapGestureRecognizer }.map(\.numberOfTapsRequired),
+            [2]
+        )
+    }
+
+    func testDebugComboGestureAcceptsCustomUnlockSequence() {
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 120, height: 120))
+        let helper = DebugComboGestureHelper()
+        helper.setup(on: view, sequence: [.tap(count: 5)])
+
+        XCTAssertEqual(view.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.count, 0)
+        XCTAssertEqual(
+            view.gestureRecognizers?.compactMap { $0 as? UITapGestureRecognizer }.map(\.numberOfTapsRequired),
+            [5]
+        )
+    }
+
+    func testTableReloadPreservesVisibleItemWhenRowsAreInsertedBeforeIt() {
+        let dataSource = ScrollAnchorDataSource(items: (0..<12).map(String.init))
+        let table = UITableView(frame: CGRect(x: 0, y: 0, width: 320, height: 120), style: .plain)
+        let viewController = UIViewController()
+        let window = UIWindow(frame: table.frame)
+        viewController.view.frame = table.frame
+        viewController.view.addSubview(table)
+        window.rootViewController = viewController
+        window.makeKeyAndVisible()
+        table.dataSource = dataSource
+        table.rowHeight = 40
+        table.estimatedRowHeight = 40
+        table.reloadData()
+        table.layoutIfNeeded()
+
+        table.scrollToRow(at: IndexPath(row: 4, section: 0), at: .top, animated: false)
+        table.layoutIfNeeded()
+        XCTAssertEqual(table.cellForRow(at: IndexPath(row: 4, section: 0))?.accessibilityIdentifier, "4")
+
+        dataSource.items.insert(contentsOf: ["new-0", "new-1"], at: 0)
+        table.adsDebugReloadDataPreservingVisibleItem(
+            anchorKeyForVisibleCell: { _, cell in cell.accessibilityIdentifier },
+            indexPathForKey: { key in
+                dataSource.items.firstIndex(of: key).map { IndexPath(row: $0, section: 0) }
+            }
+        )
+
+        let topPoint = CGPoint(x: table.bounds.midX, y: table.contentOffset.y + table.adjustedContentInset.top + 1)
+        guard let topIndexPath = table.indexPathForRow(at: topPoint) else {
+            return XCTFail("Expected a visible row at the top of the table")
+        }
+        XCTAssertEqual(dataSource.items[topIndexPath.row], "4")
+    }
+
     func testListDesignTokensKeepRoundedCardsAndShadowedHeaderText() {
         let cell = AdsDebugCardTableViewCell(style: .subtitle, reuseIdentifier: nil)
         cell.configure(title: "Card", detail: "Line")
@@ -418,6 +505,26 @@ private extension UIView {
             }
         }
         return nil
+    }
+}
+
+private final class ScrollAnchorDataSource: NSObject, UITableViewDataSource {
+    var items: [String]
+
+    init(items: [String]) {
+        self.items = items
+    }
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        items.count
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        let item = items[indexPath.row]
+        cell.textLabel?.text = item
+        cell.accessibilityIdentifier = item
+        return cell
     }
 }
 

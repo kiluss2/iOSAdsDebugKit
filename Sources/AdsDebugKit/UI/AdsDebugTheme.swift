@@ -284,6 +284,7 @@ final class AdsDebugCardTableViewCell: UITableViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        accessibilityIdentifier = nil
         titleLabel.attributedText = nil
         titleLabel.text = nil
         titleLabel.textColor = AdsDebugTheme.textPrimary
@@ -360,6 +361,7 @@ final class AdsDebugMonoTableViewCell: UITableViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        accessibilityIdentifier = nil
         monoLabel.text = nil
         monoLabel.textColor = AdsDebugTheme.textSecondary
     }

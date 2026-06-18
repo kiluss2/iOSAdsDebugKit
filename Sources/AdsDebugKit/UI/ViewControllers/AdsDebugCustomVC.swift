@@ -27,7 +27,10 @@ final class AdsDebugCustomVC: UIViewController, UITableViewDataSource, UITableVi
     }
 
     @objc private func reload() {
-        table.reloadData()
+        table.adsDebugReloadDataPreservingVisibleItem(
+            anchorKeyForVisibleCell: { _, cell in cell.accessibilityIdentifier },
+            indexPathForKey: indexPath(forCustomKey:)
+        )
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -54,6 +57,7 @@ final class AdsDebugCustomVC: UIViewController, UITableViewDataSource, UITableVi
         guard indexPath.row < events.count else { return cell }
 
         let item = events[indexPath.row]
+        cell.accessibilityIdentifier = Self.key(for: item)
         let time = DateFormatter.cached.string(from: item.time)
 
         var parts = item.values
@@ -80,5 +84,21 @@ final class AdsDebugCustomVC: UIViewController, UITableViewDataSource, UITableVi
         UIPasteboard.general.string = "\(item.event) \(item.status.rawValue) \(item.message ?? "")"
         AdToast.show("Copied custom event")
         tableView.deselectRow(at: indexPath, animated: true)
+    }
+
+    private func indexPath(forCustomKey key: String) -> IndexPath? {
+        let events = AdTelemetry.shared.customEventsSnapshot()
+        guard let row = events.firstIndex(where: { Self.key(for: $0) == key }) else { return nil }
+        return IndexPath(row: row, section: 0)
+    }
+
+    private static func key(for event: AdDebugCustomEvent) -> String {
+        [
+            String(event.time.timeIntervalSinceReferenceDate),
+            event.event,
+            event.status.rawValue,
+            event.message ?? "",
+            event.values.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
+        ].joined(separator: "|")
     }
 }

@@ -36,7 +36,10 @@ final class AdsDebugEventsVC: UIViewController, UITableViewDataSource, UITableVi
     }
     
     @objc private func reload() {
-        table.reloadData()
+        table.adsDebugReloadDataPreservingVisibleItem(
+            anchorKeyForVisibleCell: { _, cell in cell.accessibilityIdentifier },
+            indexPathForKey: indexPath(forEventKey:)
+        )
     }
     
     // MARK: - TableView DataSource
@@ -96,6 +99,7 @@ final class AdsDebugEventsVC: UIViewController, UITableViewDataSource, UITableVi
             guard indexPath.row < eventArray.count else { break }
             
             let e = eventArray[indexPath.row]
+            c.accessibilityIdentifier = Self.key(for: e)
             let time = DateFormatter.cached.string(from: e.time)
             let titleColor = e.action == .custom("Will appear") ? AdsDebugTheme.loading : nil
             
@@ -129,5 +133,27 @@ final class AdsDebugEventsVC: UIViewController, UITableViewDataSource, UITableVi
         }
         
         tableView.deselectRow(at: indexPath, animated: true)
+    }
+
+    private func indexPath(forEventKey key: String) -> IndexPath? {
+        let events = AdTelemetry.shared.eventsSnapshot()
+        guard let row = events.firstIndex(where: { Self.key(for: $0) == key }) else { return nil }
+        return IndexPath(row: row, section: 1)
+    }
+
+    private static func key(for event: AdEvent) -> String {
+        let parts: [String] = [
+            String(event.time.timeIntervalSinceReferenceDate),
+            event.unit.raw,
+            event.action.rawValue,
+            event.adIdName ?? "",
+            event.adId ?? "",
+            event.network ?? "",
+            event.lineItem ?? "",
+            event.precision ?? "",
+            event.error ?? "",
+            event.eCPM.map { String($0) } ?? ""
+        ]
+        return parts.joined(separator: "|")
     }
 }

@@ -127,9 +127,16 @@ UIKit:
 
 ```swift
 let helper = DebugComboGestureHelper()
-helper.setup(on: appIconView) {
-  AdsDebugWindowManager.shared.show()
-}
+helper.setup(on: appIconView)
+```
+
+The default combo is `swipe down -> double tap -> swipe up`. Apps can provide a custom code when
+that fits the product better:
+
+```swift
+helper.setup(on: versionLabel, sequence: [.tap(count: 5)])
+
+helper.setup(on: logoView, sequence: [.swipeLeft, .tap(count: 3), .swipeRight], timeout: 4)
 ```
 
 SwiftUI:
@@ -139,11 +146,23 @@ Image("AppIcon")
   .resizable()
   .frame(width: 96, height: 96)
   .adsDebugComboUnlock()
+
+Text(appVersion)
+  .adsDebugComboUnlock(sequence: [.tap(count: 5)])
 ```
 
 `DebugComboGestureHelper` enables debug mode internally before calling the completion. Keep a
 strong reference to `helper` for as long as the UIKit unlock view is alive. SwiftUI apps should use
 `.adsDebugComboUnlock()` so the package owns that bridge.
+
+UIKit apps only need a completion when they want to override the default action:
+
+```swift
+helper.setup(on: appIconView, sequence: [.tap(count: 5)]) {
+  AppDebugFlags.shared.enableInternalTools()
+  AdsDebugWindowManager.shared.show()
+}
+```
 
 ### 5. Log Ad Events
 
@@ -258,7 +277,7 @@ This means app ads use the normal production configuration unless a tester expli
 ### Override Modes
 
 - `normal`: use configured app IDs.
-- `failPrimary`: priority placements use invalid IDs; normal and AdMob-only requests stay configured.
+- `failPrimary`: priority placements (`2F`, `HF`, or `MF` naming) use invalid IDs; normal and AdMob-only requests stay configured.
 - `failAll`: all overridable ad unit requests use invalid IDs.
 - `forceAdMobOnly`: primary requests fail; AdMob-only fallback requests use configured backup IDs.
 - `custom`: each placement can be set from the Ad Units tab.
@@ -438,6 +457,13 @@ Attach the hidden combo directly to a quiet SwiftUI view, usually the splash app
 ```swift
 SplashAppIconView()
   .adsDebugComboUnlock()
+```
+
+Custom unlock sequence:
+
+```swift
+SplashAppIconView()
+  .adsDebugComboUnlock(sequence: [.tap(count: 5)])
 ```
 
 The modifier installs AdsDebugKit's built-in `DebugComboGestureHelper` under the hood. It does not

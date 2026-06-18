@@ -878,7 +878,12 @@ public final class AdTelemetry {
 
     private func isPriorityPlacement(_ placement: String) -> Bool {
         let lower = placement.lowercased()
-        return lower.contains("2fid") || lower.contains("mfid") || lower.contains("_2f_id") || lower.contains("_mf_id")
+        return lower.contains("2fid")
+            || lower.contains("hfid")
+            || lower.contains("mfid")
+            || lower.contains("_2f_id")
+            || lower.contains("_hf_id")
+            || lower.contains("_mf_id")
     }
 
     private func isAdmobOnlyPlacement(_ placement: String) -> Bool {

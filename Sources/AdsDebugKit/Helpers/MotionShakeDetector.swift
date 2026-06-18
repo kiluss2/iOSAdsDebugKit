@@ -11,7 +11,16 @@ import UIKit
 public final class MotionShakeDetector {
     public static let shared = MotionShakeDetector()
     private let motion = CMMotionManager()
+    private let motionQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "adsdebugkit.motion.shake"
+        queue.qualityOfService = .utility
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }()
     private var handler: (() -> Void)?
+    private var isEnabled = false
+    private var lifecycleObservers: [NSObjectProtocol] = []
 
     // --- Tunables (Adjustable parameters) ---
     
@@ -30,19 +39,57 @@ public final class MotionShakeDetector {
     private var lastDirection: Int = 0 // 0 = None, 1 = Positive, -1 = Negative
     private var lastDirectionChangeTime: TimeInterval = 0
     
-    private let updateInterval = 1.0 / 60.0 // 60 Hz
+    private let updateInterval = 1.0 / 20.0 // 20 Hz
 
-    private init() {}
+    private init() {
+        installLifecycleObservers()
+    }
 
     public func start(_ onShake: @escaping () -> Void) {
         handler = onShake
+        isEnabled = true
+        startUpdatesIfNeeded()
+    }
+
+    public func stop() {
+        isEnabled = false
+        stopUpdates()
+        handler = nil
+        resetShakeState()
+    }
+
+    private func installLifecycleObservers() {
+        let center = NotificationCenter.default
+        lifecycleObservers = [
+            center.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.startUpdatesIfNeeded()
+            },
+            center.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.stopUpdates()
+                self?.resetShakeState()
+            }
+        ]
+    }
+
+    private func startUpdatesIfNeeded() {
+        guard isEnabled else { return }
+        guard UIApplication.shared.applicationState != .background else { return }
+        guard !motion.isDeviceMotionActive else { return }
         guard motion.isDeviceMotionAvailable else {
             print("ShakeDetector Error: Device Motion is not available.")
             return
         }
 
         motion.deviceMotionUpdateInterval = updateInterval
-        motion.startDeviceMotionUpdates(to: .init()) { [weak self] data, _ in
+        motion.startDeviceMotionUpdates(to: motionQueue) { [weak self] data, _ in
             guard let self, let accel = data?.userAcceleration else { return }
             
             let now = CFAbsoluteTimeGetCurrent()
@@ -83,8 +130,16 @@ public final class MotionShakeDetector {
         }
     }
 
-    public func stop() {
+    private func stopUpdates() {
         motion.stopDeviceMotionUpdates()
-        handler = nil
+    }
+
+    private func resetShakeState() {
+        lastDirection = 0
+        lastDirectionChangeTime = 0
+    }
+
+    deinit {
+        lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
     }
 }

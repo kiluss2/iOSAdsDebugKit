@@ -27,20 +27,22 @@ public extension View {
 
     func adsDebugComboUnlock(
         enabled: Bool = true,
+        sequence: [DebugComboGestureStep] = DebugComboGestureStep.defaultSequence,
         onUnlock: (() -> Void)? = nil
     ) -> some View {
-        modifier(AdsDebugComboUnlockModifier(enabled: enabled, onUnlock: onUnlock))
+        modifier(AdsDebugComboUnlockModifier(enabled: enabled, sequence: sequence, onUnlock: onUnlock))
     }
 }
 
 @available(iOS 13.0, *)
 private struct AdsDebugComboUnlockModifier: ViewModifier {
     let enabled: Bool
+    let sequence: [DebugComboGestureStep]
     let onUnlock: (() -> Void)?
 
     func body(content: Content) -> some View {
         if enabled {
-            content.overlay(AdsDebugComboUnlockHost(onUnlock: onUnlock))
+            content.overlay(AdsDebugComboUnlockHost(sequence: sequence, onUnlock: onUnlock))
         } else {
             content
         }
@@ -49,10 +51,11 @@ private struct AdsDebugComboUnlockModifier: ViewModifier {
 
 @available(iOS 13.0, *)
 private struct AdsDebugComboUnlockHost: UIViewRepresentable {
+    let sequence: [DebugComboGestureStep]
     let onUnlock: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onUnlock: onUnlock)
+        Coordinator(sequence: sequence, onUnlock: onUnlock)
     }
 
     func makeUIView(context: Context) -> ComboUnlockHostView {
@@ -66,25 +69,30 @@ private struct AdsDebugComboUnlockHost: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: ComboUnlockHostView, context: Context) {
+        context.coordinator.sequence = sequence
         context.coordinator.onUnlock = onUnlock
         uiView.coordinator = context.coordinator
         context.coordinator.install(on: uiView)
     }
 
     final class Coordinator {
+        fileprivate var sequence: [DebugComboGestureStep]
         fileprivate var onUnlock: (() -> Void)?
         private let helper = DebugComboGestureHelper()
         private weak var installedView: UIView?
+        private var installedSequence: [DebugComboGestureStep]?
 
-        init(onUnlock: (() -> Void)?) {
+        init(sequence: [DebugComboGestureStep], onUnlock: (() -> Void)?) {
+            self.sequence = sequence
             self.onUnlock = onUnlock
         }
 
         func install(on view: UIView) {
-            guard installedView !== view else { return }
+            guard installedView !== view || installedSequence != sequence else { return }
             helper.cleanup()
             installedView = view
-            helper.setup(on: view) { [weak self] in
+            installedSequence = sequence
+            helper.setup(on: view, sequence: sequence) { [weak self] in
                 if let onUnlock = self?.onUnlock {
                     onUnlock()
                 } else {
