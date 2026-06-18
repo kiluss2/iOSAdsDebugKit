@@ -91,7 +91,7 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
         case .editKeepEvents:
             showKeepEventsEditor()
         case .overrideMode:
-            showOverrideModePicker()
+            showOverrideModePicker(from: tableView.cellForRow(at: indexPath) ?? tableView)
         case .cycleMode:
             cycleMode()
         case .clearEvents:
@@ -296,7 +296,7 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
         }
     }
 
-    private func showOverrideModePicker() {
+    private func showOverrideModePicker(from sourceView: UIView) {
         let alert = UIAlertController(title: "Ad ID Override", message: nil, preferredStyle: .actionSheet)
         for mode in AdIdOverrideMode.allCases {
             alert.addAction(UIAlertAction(title: mode.displayName, style: .default) { [weak self] _ in
@@ -305,6 +305,13 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
             })
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = sourceView
+            popover.sourceRect = sourceView.bounds
+            popover.permittedArrowDirections = [.up, .down]
+        }
+
         present(alert, animated: true)
     }
 

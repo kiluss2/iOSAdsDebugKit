@@ -343,6 +343,36 @@ final class AdsDebugKitTests: XCTestCase {
         XCTAssertLessThanOrEqual(switchFrame.maxX, cell.contentView.bounds.maxX - 16)
     }
 
+    func testSettingsOverrideModeActionSheetHasPopoverAnchorForIPad() {
+        let vc = AdsDebugSettingsVC()
+        vc.view.frame = CGRect(x: 0, y: 0, width: 768, height: 1024)
+        let window = UIWindow(frame: vc.view.frame)
+        window.rootViewController = vc
+        window.makeKeyAndVisible()
+        vc.loadViewIfNeeded()
+        vc.view.layoutIfNeeded()
+
+        guard let table = vc.view.adsDebugFirstSubview(of: UITableView.self) else {
+            return XCTFail("Expected settings table")
+        }
+
+        let overrideModeIndexPath = IndexPath(row: 5, section: 0)
+        table.layoutIfNeeded()
+        vc.tableView(table, didSelectRowAt: overrideModeIndexPath)
+
+        waitUntil {
+            vc.presentedViewController is UIAlertController
+        }
+
+        guard let alert = vc.presentedViewController as? UIAlertController else {
+            return XCTFail("Expected override mode action sheet")
+        }
+
+        XCTAssertEqual(alert.preferredStyle, .actionSheet)
+        XCTAssertNotNil(alert.popoverPresentationController?.sourceView)
+        XCTAssertNotEqual(alert.popoverPresentationController?.sourceRect, .zero)
+    }
+
     func testListDesignTokensKeepRoundedCardsAndShadowedHeaderText() {
         let cell = AdsDebugCardTableViewCell(style: .subtitle, reuseIdentifier: nil)
         cell.configure(title: "Card", detail: "Line")
