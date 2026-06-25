@@ -77,7 +77,7 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
         case .overrideMode:
             return makeOverrideCell()
         case .cycleMode:
-            return makeButtonCell(title: "Cycle mode", color: AdsDebugTheme.textPrimary)
+            return makeCycleModeCell()
         case .clearEvents:
             return makeButtonCell(title: "Clear events", color: AdsDebugTheme.failed)
         }
@@ -90,8 +90,6 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
         switch row {
         case .editKeepEvents:
             showKeepEventsEditor()
-        case .overrideMode:
-            showOverrideModePicker(from: tableView.cellForRow(at: indexPath) ?? tableView)
         case .cycleMode:
             cycleMode()
         case .clearEvents:
@@ -158,7 +156,7 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
     private func makeOverrideCell() -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
         cell.backgroundColor = .clear
-        cell.selectionStyle = .default
+        cell.selectionStyle = .none
 
         let card = makeCardView()
         let stack = makeCardStack()
@@ -171,21 +169,23 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
         titleRow.spacing = 10
 
         let titleLabel = makeTitleLabel("Ad ID override")
-        let infoLabel = UILabel()
-        infoLabel.text = "i"
-        infoLabel.textAlignment = .center
-        infoLabel.textColor = AdsDebugTheme.textPrimary
-        infoLabel.font = .systemFont(ofSize: 13, weight: .bold)
-        infoLabel.backgroundColor = AdsDebugTheme.card
-        infoLabel.layer.cornerRadius = 14
-        infoLabel.layer.borderWidth = 1
-        infoLabel.layer.borderColor = AdsDebugTheme.buttonBorderActive.cgColor
-        infoLabel.layer.masksToBounds = true
-        infoLabel.widthAnchor.constraint(equalToConstant: 28).isActive = true
-        infoLabel.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        let infoButton = UIButton(type: .system)
+        infoButton.setTitle("i", for: .normal)
+        infoButton.setTitleColor(AdsDebugTheme.textPrimary, for: .normal)
+        infoButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .bold)
+        infoButton.backgroundColor = AdsDebugTheme.card
+        infoButton.layer.cornerRadius = 14
+        infoButton.layer.borderWidth = 1
+        infoButton.layer.borderColor = AdsDebugTheme.buttonBorderActive.cgColor
+        infoButton.layer.masksToBounds = true
+        infoButton.accessibilityIdentifier = "AdsDebugAdIdOverrideInfoButton"
+        infoButton.accessibilityLabel = "Ad ID override info"
+        infoButton.addTarget(self, action: #selector(showAdIdOverrideInfo), for: .touchUpInside)
+        infoButton.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        infoButton.heightAnchor.constraint(equalToConstant: 28).isActive = true
 
         titleRow.addArrangedSubview(titleLabel)
-        titleRow.addArrangedSubview(infoLabel)
+        titleRow.addArrangedSubview(infoButton)
         stack.addArrangedSubview(titleRow)
         stack.addArrangedSubview(makeLineLabel("mode=\(AdTelemetry.shared.settings.adIdOverrideMode.rawValue)"))
         stack.addArrangedSubview(makeLineLabel("Cycle: normal/fail-primary/fail-all/force-admob-only/custom."))
@@ -226,6 +226,19 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
             label.trailingAnchor.constraint(equalTo: buttonView.trailingAnchor, constant: -12),
             label.centerYAnchor.constraint(equalTo: buttonView.centerYAnchor)
         ])
+
+        return cell
+    }
+
+    private func makeCycleModeCell() -> UITableViewCell {
+        let cell = makeButtonCell(title: "Cycle mode", color: AdsDebugTheme.textPrimary)
+        cell.contentView.accessibilityIdentifier = "AdsDebugCycleModeCellContent"
+
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleCycleModeLongPress(_:)))
+        longPress.name = "AdsDebugCycleModeLongPress"
+        longPress.minimumPressDuration = 0.5
+        longPress.cancelsTouchesInView = true
+        cell.contentView.addGestureRecognizer(longPress)
 
         return cell
     }
@@ -296,7 +309,12 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
         }
     }
 
-    private func showOverrideModePicker(from sourceView: UIView) {
+    @objc private func handleCycleModeLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began, let sourceView = gesture.view else { return }
+        showOverrideModePicker(from: sourceView)
+    }
+
+    func showOverrideModePicker(from sourceView: UIView) {
         let alert = UIAlertController(title: "Ad ID Override", message: nil, preferredStyle: .actionSheet)
         for mode in AdIdOverrideMode.allCases {
             alert.addAction(UIAlertAction(title: mode.displayName, style: .default) { [weak self] _ in
@@ -312,6 +330,27 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
             popover.permittedArrowDirections = [.up, .down]
         }
 
+        present(alert, animated: true)
+    }
+
+    @objc func showAdIdOverrideInfo() {
+        let message = [
+            "NORMAL: use app configured IDs.",
+            "FAIL_PRIMARY: only 2F/MF priority placements use invalid ID; normal and AdMob-only IDs stay configured.",
+            "FAIL_ALL: all requests use invalid ID.",
+            "FORCE_ADMOB_ONLY: every non-AdMob-only placement uses invalid ID; only *_admob_only_id stays configured.",
+            "CUSTOM: Ad Units tab shows Release / Debug / False buttons per placement.",
+            "Custom Release uses the app configured ID. Debug uses Google test ID by ad format. False uses /0000000000.",
+            "Tap Cycle mode to move to the next mode. Long-press Cycle mode to choose a specific mode."
+        ].joined(separator: "\n\n")
+
+        let alert = UIAlertController(
+            title: "Ad ID override modes",
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.view.tintColor = AdsDebugTheme.loading
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
     }
 

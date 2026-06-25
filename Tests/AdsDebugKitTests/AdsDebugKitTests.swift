@@ -370,7 +370,7 @@ final class AdsDebugKitTests: XCTestCase {
         XCTAssertLessThanOrEqual(switchFrame.maxX, cell.contentView.bounds.maxX - 16)
     }
 
-    func testSettingsOverrideModeActionSheetHasPopoverAnchorForIPad() {
+    func testSettingsAdIdOverrideCardDoesNotOpenModePickerLikeAndroid() {
         let vc = AdsDebugSettingsVC()
         vc.view.frame = CGRect(x: 0, y: 0, width: 768, height: 1024)
         let window = UIWindow(frame: vc.view.frame)
@@ -387,6 +387,39 @@ final class AdsDebugKitTests: XCTestCase {
         table.layoutIfNeeded()
         vc.tableView(table, didSelectRowAt: overrideModeIndexPath)
 
+        XCTAssertNil(vc.presentedViewController)
+        XCTAssertEqual(
+            table.cellForRow(at: overrideModeIndexPath)?.selectionStyle,
+            UITableViewCell.SelectionStyle.none
+        )
+    }
+
+    func testSettingsCycleModeLongPressCanOpenModePicker() {
+        let vc = AdsDebugSettingsVC()
+        vc.view.frame = CGRect(x: 0, y: 0, width: 768, height: 1024)
+        let window = UIWindow(frame: vc.view.frame)
+        window.rootViewController = vc
+        window.makeKeyAndVisible()
+        vc.loadViewIfNeeded()
+        vc.view.layoutIfNeeded()
+
+        guard let table = vc.view.adsDebugFirstSubview(of: UITableView.self) else {
+            return XCTFail("Expected settings table")
+        }
+
+        let cycleModeIndexPath = IndexPath(row: 6, section: 0)
+        table.layoutIfNeeded()
+        guard let cell = table.cellForRow(at: cycleModeIndexPath) else {
+            return XCTFail("Expected Cycle mode row")
+        }
+
+        let longPress = cell.contentView.gestureRecognizers?
+            .compactMap { $0 as? UILongPressGestureRecognizer }
+            .first { $0.name == "AdsDebugCycleModeLongPress" }
+        XCTAssertNotNil(longPress)
+
+        vc.showOverrideModePicker(from: cell.contentView)
+
         waitUntil {
             vc.presentedViewController is UIAlertController
         }
@@ -398,6 +431,45 @@ final class AdsDebugKitTests: XCTestCase {
         XCTAssertEqual(alert.preferredStyle, .actionSheet)
         XCTAssertNotNil(alert.popoverPresentationController?.sourceView)
         XCTAssertNotEqual(alert.popoverPresentationController?.sourceRect, .zero)
+    }
+
+    func testSettingsAdIdOverrideInfoButtonShowsDescriptionDialogLikeAndroid() {
+        let vc = AdsDebugSettingsVC()
+        vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let window = UIWindow(frame: vc.view.frame)
+        window.rootViewController = vc
+        window.makeKeyAndVisible()
+        vc.loadViewIfNeeded()
+        vc.view.layoutIfNeeded()
+
+        guard let table = vc.view.adsDebugFirstSubview(of: UITableView.self) else {
+            return XCTFail("Expected settings table")
+        }
+
+        let overrideModeIndexPath = IndexPath(row: 5, section: 0)
+        table.layoutIfNeeded()
+        guard let cell = table.cellForRow(at: overrideModeIndexPath),
+              let infoButton = cell.adsDebugFirstSubview(of: UIButton.self) else {
+            return XCTFail("Expected Ad ID override info button")
+        }
+
+        XCTAssertEqual(infoButton.accessibilityIdentifier, "AdsDebugAdIdOverrideInfoButton")
+        XCTAssertEqual(infoButton.actions(forTarget: vc, forControlEvent: .touchUpInside), ["showAdIdOverrideInfo"])
+        vc.showAdIdOverrideInfo()
+
+        waitUntil {
+            vc.presentedViewController is UIAlertController
+        }
+
+        guard let alert = vc.presentedViewController as? UIAlertController else {
+            return XCTFail("Expected info dialog")
+        }
+
+        XCTAssertEqual(alert.preferredStyle, .alert)
+        XCTAssertEqual(alert.title, "Ad ID override modes")
+        XCTAssertTrue(alert.message?.contains("FAIL_PRIMARY") == true)
+        XCTAssertTrue(alert.message?.contains("CUSTOM") == true)
+        XCTAssertTrue(alert.message?.contains("Long-press Cycle mode") == true)
     }
 
     func testDebugComboGestureDefaultSequenceMatchesAndroidStyleUnlock() {
