@@ -334,6 +334,7 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
     }
 
     @objc func showAdIdOverrideInfo() {
+        let cycleModeTip = "💡 TIP: Tap Cycle mode to move to the next mode. Long-press Cycle mode to choose a specific mode."
         let message = [
             "NORMAL: use app configured IDs.",
             "FAIL_PRIMARY: only 2F/MF priority placements use invalid ID; normal and AdMob-only IDs stay configured.",
@@ -341,7 +342,7 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
             "FORCE_ADMOB_ONLY: every non-AdMob-only placement uses invalid ID; only *_admob_only_id stays configured.",
             "CUSTOM: Ad Units tab shows Release / Debug / False buttons per placement.",
             "Custom Release uses the app configured ID. Debug uses Google test ID by ad format. False uses /0000000000.",
-            "Tap Cycle mode to move to the next mode. Long-press Cycle mode to choose a specific mode."
+            cycleModeTip
         ].joined(separator: "\n\n")
 
         let alert = UIAlertController(
@@ -350,6 +351,14 @@ final class AdsDebugSettingsVC: UIViewController, UITableViewDataSource, UITable
             preferredStyle: .alert
         )
         alert.view.tintColor = AdsDebugTheme.loading
+        let attributedMessage = NSMutableAttributedString(string: message)
+        let tipRange = (message as NSString).range(of: cycleModeTip)
+        attributedMessage.addAttributes([
+            .foregroundColor: AdsDebugTheme.loading,
+            .backgroundColor: AdsDebugTheme.loading.withAlphaComponent(0.15),
+            .font: UIFont.systemFont(ofSize: 17, weight: .semibold)
+        ], range: tipRange)
+        alert.setValue(attributedMessage, forKey: "attributedMessage")
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
     }
