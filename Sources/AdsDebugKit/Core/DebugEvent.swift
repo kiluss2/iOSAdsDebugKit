@@ -203,6 +203,47 @@ public struct AdDebugCustomEvent: Codable, Equatable {
     }
 }
 
+/// A type-erased value that can be selected from the debug console at runtime.
+public enum AdDebugValue: Codable, Equatable {
+    case bool(Bool)
+    case integer(Int)
+    case double(Double)
+    case string(String)
+
+    public var displayValue: String {
+        switch self {
+        case .bool(let value): return value ? "true" : "false"
+        case .integer(let value): return String(value)
+        case .double(let value): return String(value)
+        case .string(let value): return value
+        }
+    }
+}
+
+/// A selectable value and its tester-facing label.
+public struct AdDebugValueOption: Codable, Equatable {
+    public let title: String
+    public let value: AdDebugValue
+
+    public init(_ title: String, value: AdDebugValue) {
+        self.title = title
+        self.value = value
+    }
+}
+
+/// Describes one app value that testers may override from the debug console.
+public struct AdDebugValueDefinition: Codable, Equatable {
+    public let key: String
+    public let title: String
+    public let options: [AdDebugValueOption]
+
+    public init(key: String, title: String, options: [AdDebugValueOption]) {
+        self.key = key
+        self.title = title
+        self.options = options
+    }
+}
+
 public struct AdDebugSettings: Codable, Equatable {
     public var debugEnabled: Bool
     public var showToasts: Bool
@@ -210,6 +251,7 @@ public struct AdDebugSettings: Codable, Equatable {
     public var adIdOverrideMode: AdIdOverrideMode
     public var customAdUnitModes: [String: AdUnitCustomMode]
     public var rawLogTapEnabled: Bool
+    public var debugValueOverrides: [String: AdDebugValue]
 
     public init(
         debugEnabled: Bool = false,
@@ -217,7 +259,8 @@ public struct AdDebugSettings: Codable, Equatable {
         keepEvents: Int = 100,
         adIdOverrideMode: AdIdOverrideMode = .normal,
         customAdUnitModes: [String: AdUnitCustomMode] = [:],
-        rawLogTapEnabled: Bool = false
+        rawLogTapEnabled: Bool = false,
+        debugValueOverrides: [String: AdDebugValue] = [:]
     ) {
         self.debugEnabled = debugEnabled
         self.showToasts = showToasts
@@ -225,6 +268,7 @@ public struct AdDebugSettings: Codable, Equatable {
         self.adIdOverrideMode = adIdOverrideMode
         self.customAdUnitModes = customAdUnitModes
         self.rawLogTapEnabled = rawLogTapEnabled
+        self.debugValueOverrides = debugValueOverrides
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -234,6 +278,7 @@ public struct AdDebugSettings: Codable, Equatable {
         case adIdOverrideMode
         case customAdUnitModes
         case rawLogTapEnabled
+        case debugValueOverrides
     }
 
     public init(from decoder: Decoder) throws {
@@ -244,6 +289,7 @@ public struct AdDebugSettings: Codable, Equatable {
         adIdOverrideMode = try c.decodeIfPresent(AdIdOverrideMode.self, forKey: .adIdOverrideMode) ?? .normal
         customAdUnitModes = try c.decodeIfPresent([String: AdUnitCustomMode].self, forKey: .customAdUnitModes) ?? [:]
         rawLogTapEnabled = try c.decodeIfPresent(Bool.self, forKey: .rawLogTapEnabled) ?? false
+        debugValueOverrides = try c.decodeIfPresent([String: AdDebugValue].self, forKey: .debugValueOverrides) ?? [:]
     }
 }
 

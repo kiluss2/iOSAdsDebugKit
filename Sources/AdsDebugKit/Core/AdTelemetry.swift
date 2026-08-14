@@ -187,6 +187,57 @@ public final class AdTelemetry {
         settings = s
     }
 
+    // MARK: - Public API: Debug Value Overrides
+
+    /// Registered app values shown in the Values tab, preserving app-provided order.
+    public func getDebugValues() -> [AdDebugValueDefinition] {
+        configuration?.getDebugValues() ?? []
+    }
+
+    /// Sets a registered value override. Pass nil to return to the app-provided value.
+    public func setDebugValueOverride(_ value: AdDebugValue?, forKey key: String) {
+        guard let definition = debugValueDefinition(forKey: key) else { return }
+        if let value, !definition.options.contains(where: { $0.value == value }) { return }
+
+        var currentSettings = settings
+        if let value {
+            currentSettings.debugValueOverrides[key] = value
+        } else {
+            currentSettings.debugValueOverrides.removeValue(forKey: key)
+        }
+        settings = currentSettings
+    }
+
+    /// Returns the active stored selection for UI display, or nil for App Value.
+    public func debugValueOverride(forKey key: String) -> AdDebugValue? {
+        guard let definition = debugValueDefinition(forKey: key),
+              let value = settings.debugValueOverrides[key],
+              definition.options.contains(where: { $0.value == value }) else {
+            return nil
+        }
+        return value
+    }
+
+    public func resolveDebugValue(_ appValue: Bool, forKey key: String) -> Bool {
+        guard case .bool(let value) = resolvedDebugValue(forKey: key) else { return appValue }
+        return value
+    }
+
+    public func resolveDebugValue(_ appValue: Int, forKey key: String) -> Int {
+        guard case .integer(let value) = resolvedDebugValue(forKey: key) else { return appValue }
+        return value
+    }
+
+    public func resolveDebugValue(_ appValue: Double, forKey key: String) -> Double {
+        guard case .double(let value) = resolvedDebugValue(forKey: key) else { return appValue }
+        return value
+    }
+
+    public func resolveDebugValue(_ appValue: String, forKey key: String) -> String {
+        guard case .string(let value) = resolvedDebugValue(forKey: key) else { return appValue }
+        return value
+    }
+
     public func customMode(forAdUnitName adUnitName: String) -> AdUnitCustomMode {
         return customMode(forAdUnitName: adUnitName, settings: settings)
     }
@@ -794,6 +845,15 @@ public final class AdTelemetry {
         case .primary: return primary
         case .admobOnly: return admobOnly ?? primary
         }
+    }
+
+    private func debugValueDefinition(forKey key: String) -> AdDebugValueDefinition? {
+        getDebugValues().first { $0.key == key }
+    }
+
+    private func resolvedDebugValue(forKey key: String) -> AdDebugValue? {
+        guard settings.debugEnabled else { return nil }
+        return debugValueOverride(forKey: key)
     }
 
     private func customMode(forAdUnitName adUnitName: String, settings currentSettings: Settings) -> AdUnitCustomMode {

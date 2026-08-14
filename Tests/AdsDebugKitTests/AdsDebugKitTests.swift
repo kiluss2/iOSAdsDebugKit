@@ -9,6 +9,9 @@ final class AdsDebugKitTests: XCTestCase {
             allAdIDs: { TestAdID.allCases },
             admobOnlyAdID: { provider in
                 provider.name == TestAdID.priority.name ? TestAdID.admobOnly : nil
+            },
+            debugValues: {
+                TestDebugValues.definitions
             }
         ))
     }
@@ -83,6 +86,69 @@ final class AdsDebugKitTests: XCTestCase {
             AdTelemetry.shared.resolveAdUnitId(provider: TestAdID.appId),
             TestAdID.appId.id
         )
+    }
+
+    func testDebugValueResolverReturnsAppValueWhenDebugDisabled() {
+        AdTelemetry.shared.setDebugValueOverride(.string("b"), forKey: "onboarding_flow")
+
+        XCTAssertEqual(
+            AdTelemetry.shared.resolveDebugValue("remote-config", forKey: "onboarding_flow"),
+            "remote-config"
+        )
+    }
+
+    func testDebugValueResolverOverridesSupportedTypesWhenDebugEnabled() {
+        enableDebug()
+        AdTelemetry.shared.setDebugValueOverride(.string("b"), forKey: "onboarding_flow")
+        AdTelemetry.shared.setDebugValueOverride(.bool(true), forKey: "new_paywall")
+        AdTelemetry.shared.setDebugValueOverride(.integer(5), forKey: "retry_count")
+        AdTelemetry.shared.setDebugValueOverride(.double(0.75), forKey: "sample_rate")
+
+        XCTAssertEqual(AdTelemetry.shared.resolveDebugValue("a", forKey: "onboarding_flow"), "b")
+        XCTAssertTrue(AdTelemetry.shared.resolveDebugValue(false, forKey: "new_paywall"))
+        XCTAssertEqual(AdTelemetry.shared.resolveDebugValue(1, forKey: "retry_count"), 5)
+        XCTAssertEqual(AdTelemetry.shared.resolveDebugValue(0.1, forKey: "sample_rate"), 0.75)
+    }
+
+    func testDebugValueAppValueClearsStoredOverride() {
+        enableDebug()
+        AdTelemetry.shared.setDebugValueOverride(.string("b"), forKey: "onboarding_flow")
+        AdTelemetry.shared.setDebugValueOverride(nil, forKey: "onboarding_flow")
+
+        XCTAssertNil(AdTelemetry.shared.debugValueOverride(forKey: "onboarding_flow"))
+        XCTAssertEqual(AdTelemetry.shared.resolveDebugValue("a", forKey: "onboarding_flow"), "a")
+    }
+
+    func testDebugValueRejectsUnregisteredOrUnlistedValues() {
+        enableDebug()
+        AdTelemetry.shared.setDebugValueOverride(.string("not-registered"), forKey: "unknown")
+        AdTelemetry.shared.setDebugValueOverride(.string("c"), forKey: "onboarding_flow")
+
+        XCTAssertEqual(AdTelemetry.shared.settings.debugValueOverrides, [:])
+        XCTAssertEqual(AdTelemetry.shared.resolveDebugValue("a", forKey: "unknown"), "a")
+        XCTAssertEqual(AdTelemetry.shared.resolveDebugValue("a", forKey: "onboarding_flow"), "a")
+    }
+
+    func testDebugValueTypeMismatchFallsBackToAppValue() {
+        enableDebug()
+        AdTelemetry.shared.setDebugValueOverride(.string("b"), forKey: "onboarding_flow")
+
+        XCTAssertEqual(AdTelemetry.shared.resolveDebugValue(false, forKey: "onboarding_flow"), false)
+    }
+
+    func testDebugValueOverridesRoundTripThroughSettingsPersistencePayload() throws {
+        let original = AdDebugSettings(
+            debugEnabled: true,
+            debugValueOverrides: [
+                "onboarding_flow": .string("b"),
+                "retry_count": .integer(5)
+            ]
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AdDebugSettings.self, from: data)
+
+        XCTAssertEqual(decoded, original)
     }
 
     func testCustomDebugModeUsesIOSAdMobTestId() {
@@ -280,6 +346,7 @@ final class AdsDebugKitTests: XCTestCase {
         XCTAssertEqual(settings.adIdOverrideMode, .normal)
         XCTAssertEqual(settings.customAdUnitModes, [:])
         XCTAssertFalse(settings.rawLogTapEnabled)
+        XCTAssertEqual(settings.debugValueOverrides, [:])
     }
 
     func testEventTrimAppliesToAllStreams() {
@@ -306,12 +373,42 @@ final class AdsDebugKitTests: XCTestCase {
         XCTAssertEqual(AdTelemetry.shared.customEventsSnapshot().first?.event, "b")
     }
 
-    func testConsoleTabsMatchAndroidOrder() {
-        XCTAssertEqual(AdsDebugVC.tabTitles, ["Ad States", "Ad Events", "Externals", "Custom", "Settings", "Ad Units"])
+    func testConsoleTabsIncludeRuntimeValues() {
+        XCTAssertEqual(AdsDebugVC.tabTitles, ["Ad States", "Ad Events", "Externals", "Custom", "Values", "Settings", "Ad Units"])
 
         let vc = AdsDebugVC()
         vc.loadViewIfNeeded()
         XCTAssertEqual(vc.children.count, 1)
+    }
+
+    func testValuesTabShowsRegisteredDefinitionsAndPicker() {
+        enableDebug()
+        let vc = AdsDebugValuesVC()
+        vc.view.frame = CGRect(x: 0, y: 0, width: 768, height: 1024)
+        let window = UIWindow(frame: vc.view.frame)
+        window.rootViewController = vc
+        window.makeKeyAndVisible()
+        vc.loadViewIfNeeded()
+        vc.view.layoutIfNeeded()
+
+        guard let table = vc.view.adsDebugFirstSubview(of: UITableView.self) else {
+            return XCTFail("Expected values table")
+        }
+        XCTAssertEqual(table.numberOfRows(inSection: 0), TestDebugValues.definitions.count)
+
+        let definition = TestDebugValues.definitions[0]
+        vc.showValuePicker(for: definition, sourceView: vc.view)
+
+        waitUntil {
+            vc.presentedViewController is UIAlertController
+        }
+
+        guard let alert = vc.presentedViewController as? UIAlertController else {
+            return XCTFail("Expected value picker action sheet")
+        }
+        XCTAssertEqual(alert.preferredStyle, .actionSheet)
+        XCTAssertEqual(alert.actions.map(\.title), ["App Value ✓", "Flow A", "Flow B", "Cancel"])
+        XCTAssertNotNil(alert.popoverPresentationController?.sourceView)
     }
 
     func testConsoleBackgroundLeavesStatusAreaBlurredAndDimmedLikeAndroid() {
@@ -598,6 +695,43 @@ private final class ScrollAnchorDataSource: NSObject, UITableViewDataSource {
         cell.accessibilityIdentifier = item
         return cell
     }
+}
+
+private enum TestDebugValues {
+    static let definitions: [AdDebugValueDefinition] = [
+        AdDebugValueDefinition(
+            key: "onboarding_flow",
+            title: "Onboarding flow",
+            options: [
+                AdDebugValueOption("Flow A", value: .string("a")),
+                AdDebugValueOption("Flow B", value: .string("b"))
+            ]
+        ),
+        AdDebugValueDefinition(
+            key: "new_paywall",
+            title: "New paywall",
+            options: [
+                AdDebugValueOption("Off", value: .bool(false)),
+                AdDebugValueOption("On", value: .bool(true))
+            ]
+        ),
+        AdDebugValueDefinition(
+            key: "retry_count",
+            title: "Retry count",
+            options: [
+                AdDebugValueOption("One", value: .integer(1)),
+                AdDebugValueOption("Five", value: .integer(5))
+            ]
+        ),
+        AdDebugValueDefinition(
+            key: "sample_rate",
+            title: "Sample rate",
+            options: [
+                AdDebugValueOption("10%", value: .double(0.1)),
+                AdDebugValueOption("75%", value: .double(0.75))
+            ]
+        )
+    ]
 }
 
 private enum TestAdID: String, CaseIterable, Codable, AdIDProvider {

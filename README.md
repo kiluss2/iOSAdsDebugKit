@@ -1,8 +1,8 @@
 # iOSAdsDebugKit
 
-iOSAdsDebugKit is an in-app debug panel for inspecting iOS ads, ad revenue, external tracking events, custom QA logs, and runtime ad unit overrides in debug or internal release builds.
+iOSAdsDebugKit is an in-app debug panel for inspecting iOS ads, ad revenue, external tracking events, custom QA logs, runtime app value overrides, and ad unit overrides in debug or internal release builds.
 
-It is designed for production QA flows where testers need to enable a hidden debug panel from inside the app, inspect real ad states, force ad-load failures, test AdMob-only fallback, and verify tracking SDK callbacks without rebuilding the app.
+It is designed for production QA flows where testers need to enable a hidden debug panel from inside the app, force A/B variants, inspect real ad states, test ad failure and fallback paths, and verify tracking SDK callbacks without rebuilding the app.
 
 ## Requirements
 
@@ -18,6 +18,7 @@ It is designed for production QA flows where testers need to enable a hidden deb
 - Ad state dashboard for real ad placements: load, show/impression, and revenue.
 - External tracking tab for Adjust, AppsFlyer, Firebase, Meta, in-house, and similar SDK events.
 - Custom event tab for app-defined QA/debug signals.
+- Runtime value overrides for A/B flows, feature flags, numeric limits, and other app configuration.
 - Runtime ad unit override modes: normal, fail primary, fail all, force AdMob-only, and custom per placement.
 - Official iOS Google Mobile Ads demo IDs for debug requests.
 - Structured parser for `ads_debug=1`, `external_debug=1`, and `custom_debug=1`.
@@ -257,6 +258,72 @@ enum AdsDebugBridge {
 }
 ```
 
+## Runtime App Value Overrides
+
+Use runtime values when QA needs to force an A/B variant, feature flag, retry limit, sample rate, or other app configuration without rebuilding the app. Supported value types are `Bool`, `Int`, `Double`, and `String`.
+
+First, register the values and the exact options that testers may select:
+
+```swift
+let config = AdTelemetryConfiguration(
+  allAdIDs: { AdvertisementID.allCases },
+  debugValues: {
+    [
+      AdDebugValueDefinition(
+        key: "onboarding_flow",
+        title: "Onboarding flow",
+        options: [
+          AdDebugValueOption("Flow A", value: .string("a")),
+          AdDebugValueOption("Flow B", value: .string("b"))
+        ]
+      ),
+      AdDebugValueDefinition(
+        key: "new_paywall",
+        title: "New paywall",
+        options: [
+          AdDebugValueOption("Off", value: .bool(false)),
+          AdDebugValueOption("On", value: .bool(true))
+        ]
+      )
+    ]
+  }
+)
+
+AdTelemetry.initialize(config)
+```
+
+Then resolve the real app or Remote Config value immediately before it controls behavior:
+
+```swift
+let remoteFlow = RemoteConfig.shared.string(forKey: "onboarding_flow")
+let flow = AdTelemetry.shared.resolveDebugValue(
+  remoteFlow,
+  forKey: "onboarding_flow"
+)
+
+switch flow {
+case "b": showNewOnboarding()
+default: showCurrentOnboarding()
+}
+
+let remotePaywallEnabled = RemoteConfig.shared.bool(forKey: "new_paywall")
+let paywallEnabled = AdTelemetry.shared.resolveDebugValue(
+  remotePaywallEnabled,
+  forKey: "new_paywall"
+)
+```
+
+Open the `Values` tab to select an option. `App Value` removes the override and immediately returns control to the value passed by the app.
+
+Overrides are persisted in `UserDefaults`, but are applied only when all of these conditions are true:
+
+- Debug mode is enabled.
+- The key is registered in `debugValues`.
+- The saved value is still one of the registered options.
+- The resolver overload matches the registered value type.
+
+Unknown keys, removed options, and type mismatches safely return the app-provided value. Calling `setDebugValueOverride(_:forKey:)` directly also rejects unknown keys and values that are not registered options.
+
 ## Release Safety
 
 iOSAdsDebugKit is safe to include in release builds when debug mode is disabled.
@@ -264,7 +331,9 @@ iOSAdsDebugKit is safe to include in release builds when debug mode is disabled.
 When `debugEnabled = false`:
 
 - Ad unit override is disabled.
+- Runtime app value overrides are ignored.
 - `resolveAdUnitId(...)` returns the original configured IDs.
+- `resolveDebugValue(_:forKey:)` returns the app-provided value.
 - Shake detector is stopped.
 - Legacy raw log tap is stopped.
 - The debug overlay is hidden.
@@ -414,12 +483,13 @@ AdTelemetry.shared.logStructuredLine(
 
 ## Debug Console
 
-Tabs are aligned with Android:
+The debug console contains:
 
 - `Ad States`: current load/show/revenue state per placement.
 - `Ad Events`: chronological ad lifecycle and revenue events.
 - `Externals`: tracking callbacks plus legacy raw lines in one feed.
 - `Custom`: app-defined QA/debug events.
+- `Values`: registered app configuration and A/B overrides.
 - `Settings`: debug mode, toast, override mode, event retention, and legacy raw log tap.
 - `Ad Units`: all configured placements and per-placement override mode.
 
@@ -510,7 +580,19 @@ AdTelemetryConfiguration(
   admobOnlyAdID: { provider in
     nil
   },
-  rawLogTapPolicy: .disabled
+  rawLogTapPolicy: .disabled,
+  debugValues: {
+    [
+      AdDebugValueDefinition(
+        key: "onboarding_flow",
+        title: "Onboarding flow",
+        options: [
+          AdDebugValueOption("Flow A", value: .string("a")),
+          AdDebugValueOption("Flow B", value: .string("b"))
+        ]
+      )
+    ]
+  }
 )
 ```
 
@@ -529,6 +611,8 @@ Main entry points:
 - `AdTelemetry.shared.logCustom(...)`
 - `AdTelemetry.shared.logStructuredLine(...)`
 - `AdTelemetry.shared.resolveAdUnitId(...)`
+- `AdTelemetry.shared.resolveDebugValue(_:forKey:)`
+- `AdTelemetry.shared.setDebugValueOverride(_:forKey:)`
 - `AdsDebugWindowManager.shared.show()`
 - `AdsDebugWindowManager.shared.hide()`
 - `AdsDebugWindowManager.shared.toggle()`
@@ -542,6 +626,9 @@ Main entry points:
 - `AdUnitCustomMode`
 - `AdIdRequestRole`
 - `AdRawLogTapPolicy`
+- `AdDebugValue`
+- `AdDebugValueOption`
+- `AdDebugValueDefinition`
 
 Implementation details such as the panel view controllers, window internals, GIF theme detection, and raw log tap internals should be treated as private.
 

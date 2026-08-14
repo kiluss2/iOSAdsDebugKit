@@ -1,7 +1,7 @@
 import UIKit
 
 final class AdsDebugVC: UIViewController {
-    static let tabTitles = ["Ad States", "Ad Events", "Externals", "Custom", "Settings", "Ad Units"]
+    static let tabTitles = ["Ad States", "Ad Events", "Externals", "Custom", "Values", "Settings", "Ad Units"]
 
     private let statusBackdropView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
     private let backgroundView = AdsDebugBackgroundView()
@@ -19,6 +19,7 @@ final class AdsDebugVC: UIViewController {
         AdsDebugEventsVC(),
         AdsDebugExternalLogsVC(),
         AdsDebugCustomVC(),
+        AdsDebugValuesVC(),
         AdsDebugSettingsVC(),
         AdsDebugAdUnitsVC()
     ]

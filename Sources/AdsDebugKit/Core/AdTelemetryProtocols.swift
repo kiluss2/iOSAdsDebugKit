@@ -27,16 +27,19 @@ public struct AdTelemetryConfiguration {
     public let adUnitMetadata: ((any AdIDProvider) -> AdDebugAdUnit?)?
     public let admobOnlyAdID: ((any AdIDProvider) -> (any AdIDProvider)?)?
     public let rawLogTapPolicy: AdRawLogTapPolicy
+    public let getDebugValues: () -> [AdDebugValueDefinition]
     
     public init(
         allAdIDs: @escaping () -> [any AdIDProvider],
         adUnitMetadata: ((any AdIDProvider) -> AdDebugAdUnit?)? = nil,
         admobOnlyAdID: ((any AdIDProvider) -> (any AdIDProvider)?)? = nil,
-        rawLogTapPolicy: AdRawLogTapPolicy = .disabled
+        rawLogTapPolicy: AdRawLogTapPolicy = .disabled,
+        debugValues: @escaping () -> [AdDebugValueDefinition] = { [] }
     ) {
         self.getAllAdIDs = allAdIDs
         self.adUnitMetadata = adUnitMetadata
         self.admobOnlyAdID = admobOnlyAdID
         self.rawLogTapPolicy = rawLogTapPolicy
+        self.getDebugValues = debugValues
     }
 }
